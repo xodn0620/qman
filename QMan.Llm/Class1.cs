@@ -1,0 +1,315 @@
+using System.Net.Http;
+using System.Net.Http.Json;
+using System.Text.Json;
+using QMan.Core;
+
+namespace QMan.Llm;
+
+public interface ILlmClient
+{
+    Task<float[]> EmbedAsync(string text, CancellationToken ct = default);
+
+    Task<string> ChatAsync(string system, string user, CancellationToken ct = default);
+}
+
+/// <summary>
+/// OpenAI API 클라이언트 (chat / embeddings).
+/// </summary>
+public sealed class OpenAiClient : ILlmClient
+{
+    private readonly AppConfig _config;
+    private readonly HttpClient _http;
+
+    public OpenAiClient(AppConfig config)
+    {
+        _config = config;
+        _http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(120)
+        };
+    }
+
+    public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+    {
+        RequireKey();
+
+        var body = new
+        {
+            model = _config.EmbeddingModel,
+            input = text ?? string.Empty
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, ResolveEmbeddingUrl())
+        {
+            Content = JsonContent.Create(body)
+        };
+        req.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _config.OpenAiApiKey);
+
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode)
+            throw new InvalidOperationException($"OpenAI Embeddings 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+
+        using var doc = JsonDocument.Parse(respBody);
+        var root = doc.RootElement;
+        var emb = root.GetProperty("data")[0].GetProperty("embedding");
+
+        var arr = new float[emb.GetArrayLength()];
+        var i = 0;
+        foreach (var v in emb.EnumerateArray())
+            arr[i++] = (float)v.GetDouble();
+        return arr;
+    }
+
+    public async Task<string> ChatAsync(string system, string user, CancellationToken ct = default)
+    {
+        RequireKey();
+
+        var messages = new List<object>();
+        if (!string.IsNullOrWhiteSpace(system))
+        {
+            messages.Add(new { role = "system", content = system });
+        }
+
+        messages.Add(new { role = "user", content = user ?? string.Empty });
+
+        var body = new
+        {
+            model = _config.ChatModel,
+            messages
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, ResolveChatUrl())
+        {
+            Content = JsonContent.Create(body)
+        };
+        req.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _config.OpenAiApiKey);
+
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode)
+            throw new InvalidOperationException($"OpenAI Chat 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+
+        using var doc = JsonDocument.Parse(respBody);
+        var root = doc.RootElement;
+        var content = root.GetProperty("choices")[0]
+            .GetProperty("message")
+            .GetProperty("content")
+            .GetString() ?? string.Empty;
+        return content;
+    }
+
+    private void RequireKey()
+    {
+        if (string.IsNullOrWhiteSpace(_config.OpenAiApiKey))
+            throw new InvalidOperationException(
+                "OpenAI API Key가 설정되지 않았습니다. config.json 또는 환경변수 OPENAI_API_KEY를 설정해주세요.");
+    }
+
+    private string ResolveChatUrl()
+    {
+        var u = _config.Url;
+        if (string.IsNullOrWhiteSpace(u))
+            return "https://api.openai.com/v1/chat/completions";
+        u = u.Trim();
+        if (u.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) return u + "/chat/completions";
+        if (u.EndsWith("/")) return u + "chat/completions";
+        if (u.Contains("/chat/", StringComparison.OrdinalIgnoreCase)) return u;
+        return u + "/chat/completions";
+    }
+
+    private string ResolveEmbeddingUrl()
+    {
+        var u = _config.Url;
+        if (string.IsNullOrWhiteSpace(u))
+            return "https://api.openai.com/v1/embeddings";
+        u = u.Trim();
+        if (u.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) return u + "/embeddings";
+        if (u.EndsWith("/")) return u + "embeddings";
+        if (u.Contains("/embeddings", StringComparison.OrdinalIgnoreCase)) return u;
+        return u + "/embeddings";
+    }
+}
+
+/// <summary>
+/// Ollama HTTP API 클라이언트 (로컬/offline).
+/// </summary>
+public sealed class OllamaClient : ILlmClient
+{
+    private readonly AppConfig _config;
+    private readonly HttpClient _http;
+
+    public OllamaClient(AppConfig config)
+    {
+        _config = config;
+        _http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(120)
+        };
+    }
+
+    public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
+    {
+        // /api/embed 우선, 실패 시 legacy /api/embeddings로 fallback
+        var body = new
+        {
+            model = _config.EmbeddingModel,
+            input = text ?? string.Empty
+        };
+
+        var url = ResolveEmbeddingUrl();
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(body)
+        };
+
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+        if (!resp.IsSuccessStatusCode)
+        {
+            // legacy 엔드포인트로 재시도
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound &&
+                IsLikelyEmbedEndpoint(url))
+            {
+                return await EmbedLegacyAsync(text ?? string.Empty, ct).ConfigureAwait(false);
+            }
+
+            throw new InvalidOperationException($"Ollama Embedding 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+        }
+
+        using var doc = JsonDocument.Parse(respBody);
+        var root = doc.RootElement;
+        JsonElement emb;
+
+        if (root.TryGetProperty("embeddings", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            var first = arr[0];
+            emb = first.ValueKind == JsonValueKind.Array ? first : arr;
+        }
+        else if (root.TryGetProperty("embedding", out var single) && single.ValueKind == JsonValueKind.Array)
+        {
+            emb = single;
+        }
+        else
+        {
+            throw new InvalidOperationException("Ollama embedding 응답 파싱 실패: " + respBody);
+        }
+
+        var v = new float[emb.GetArrayLength()];
+        var i = 0;
+        foreach (var e in emb.EnumerateArray())
+            v[i++] = (float)e.GetDouble();
+        return v;
+    }
+
+    private async Task<float[]> EmbedLegacyAsync(string text, CancellationToken ct)
+    {
+        var body = new
+        {
+            model = _config.EmbeddingModel,
+            prompt = text ?? string.Empty
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, ResolveEmbeddingUrlLegacy())
+        {
+            Content = JsonContent.Create(body)
+        };
+
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Ollama Embeddings(legacy) 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+
+        using var doc = JsonDocument.Parse(respBody);
+        var root = doc.RootElement;
+        var emb = root.GetProperty("embedding");
+
+        var v = new float[emb.GetArrayLength()];
+        var i = 0;
+        foreach (var e in emb.EnumerateArray())
+            v[i++] = (float)e.GetDouble();
+        return v;
+    }
+
+    public async Task<string> ChatAsync(string system, string user, CancellationToken ct = default)
+    {
+        var messages = new List<object>();
+        if (!string.IsNullOrWhiteSpace(system))
+        {
+            messages.Add(new { role = "system", content = system });
+        }
+
+        messages.Add(new { role = "user", content = user ?? string.Empty });
+
+        var body = new
+        {
+            model = _config.ChatModel,
+            stream = false,
+            messages
+        };
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, ResolveChatUrl())
+        {
+            Content = JsonContent.Create(body)
+        };
+
+        using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+        var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (!resp.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Ollama Chat 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+
+        using var doc = JsonDocument.Parse(respBody);
+        var root = doc.RootElement;
+
+        // /api/chat: { message: { content } } or { response: "..." }
+        var content = root.TryGetProperty("message", out var msg)
+            ? msg.GetProperty("content").GetString()
+            : root.GetProperty("response").GetString();
+
+        return content ?? string.Empty;
+    }
+
+    private string ResolveChatUrl()
+    {
+        var u = _config.Url;
+        if (string.IsNullOrWhiteSpace(u)) return "http://localhost:11434/api/chat";
+        u = u.Trim();
+        if (u.EndsWith("/")) return u + "api/chat";
+        if (u.EndsWith("/api", StringComparison.OrdinalIgnoreCase)) return u + "/chat";
+        if (u.Contains("/api/chat", StringComparison.OrdinalIgnoreCase)) return u;
+        return u + "/api/chat";
+    }
+
+    private string ResolveEmbeddingUrl()
+    {
+        var u = _config.Url;
+        if (string.IsNullOrWhiteSpace(u)) return "http://localhost:11434/api/embed";
+        u = u.Trim();
+        if (u.EndsWith("/")) return u + "api/embed";
+        if (u.EndsWith("/api", StringComparison.OrdinalIgnoreCase)) return u + "/embed";
+        if (u.Contains("/api/embed", StringComparison.OrdinalIgnoreCase)) return u;
+        if (u.Contains("/api/embeddings", StringComparison.OrdinalIgnoreCase)) return u;
+        return u + "/api/embed";
+    }
+
+    private string ResolveEmbeddingUrlLegacy()
+    {
+        var u = _config.Url;
+        if (string.IsNullOrWhiteSpace(u)) return "http://localhost:11434/api/embeddings";
+        u = u.Trim();
+        if (u.EndsWith("/")) return u + "api/embeddings";
+        if (u.EndsWith("/api", StringComparison.OrdinalIgnoreCase)) return u + "/embeddings";
+        if (u.Contains("/api/embeddings", StringComparison.OrdinalIgnoreCase)) return u;
+        return u + "/api/embeddings";
+    }
+
+    private static bool IsLikelyEmbedEndpoint(string url)
+        => !string.IsNullOrWhiteSpace(url) &&
+           (url.Contains("/api/embed", StringComparison.OrdinalIgnoreCase) ||
+            url.EndsWith("/api/embed", StringComparison.OrdinalIgnoreCase));
+}
+

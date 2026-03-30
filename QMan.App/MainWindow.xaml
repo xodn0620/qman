@@ -1,0 +1,150 @@
+<Window x:Class="QMan.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Q-Man"
+        Height="760" Width="1120"
+        MinWidth="920" MinHeight="560"
+        Background="{StaticResource BrushBg}"
+        Foreground="{StaticResource BrushText}"
+        FontFamily="Segoe UI"
+        Closing="MainWindow_OnClosing">
+    <DockPanel LastChildFill="True">
+        <!-- 하단 상태 -->
+        <Border DockPanel.Dock="Bottom" Height="34" Background="{StaticResource BrushSidebar}"
+                BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,1,0,0" Padding="16,0">
+            <TextBlock x:Name="StatusVec" VerticalAlignment="Center"
+                       Foreground="{StaticResource BrushMuted}" FontSize="12"/>
+        </Border>
+
+        <TabControl x:Name="MainTabs" Padding="0">
+            <TabItem Header="채팅">
+                <Grid Margin="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="280"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- 사이드: 카테고리 -->
+                    <Border Grid.Column="0" Background="{StaticResource BrushSidebar}"
+                            BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,0,1,0" Padding="16,20,16,16">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
+                                <TextBlock Text="질문 범위" Foreground="{StaticResource BrushMuted}"
+                                           FontSize="11" FontWeight="SemiBold" Margin="2,0,0,4"/>
+                                <TextBlock Text="카테고리" FontSize="20" FontWeight="SemiBold"
+                                           Foreground="{StaticResource BrushText}"/>
+                                <TextBlock Text="검색·답변에 사용할 매뉴얼 그룹" FontSize="12"
+                                           Foreground="{StaticResource BrushMuted}" Margin="0,6,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <ListBox x:Name="ChatCategoryList" Margin="0,4,0,0"
+                                     DisplayMemberPath="Name"/>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- 메인 채팅 -->
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <Border Grid.Row="0" Background="{StaticResource BrushBg}" Padding="20,16,20,12">
+                            <ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <StackPanel x:Name="MessagesPanel"/>
+                            </ScrollViewer>
+                        </Border>
+
+                        <Border Grid.Row="1" Background="{StaticResource BrushSurface}"
+                                BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,1,0,0"
+                                Padding="20,14,20,18">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Height="44" Margin="0,0,12,0"
+                                        Background="{StaticResource BrushElevated}"
+                                        BorderBrush="{StaticResource BrushBorder}"
+                                        BorderThickness="1" CornerRadius="10"
+                                        Padding="12,0,12,0">
+                                    <TextBox x:Name="ChatInput"
+                                             BorderThickness="0"
+                                             Background="Transparent"
+                                             VerticalAlignment="Stretch"
+                                             VerticalContentAlignment="Center"
+                                             AcceptsReturn="False"
+                                             Foreground="#F0F2F7"
+                                             CaretBrush="#F0F2F7"
+                                             PreviewKeyDown="ChatInput_OnPreviewKeyDown"/>
+                                </Border>
+                                <Button x:Name="ChatSendButton" Grid.Column="1" Content="전송"
+                                        Style="{StaticResource AccentButton}"
+                                        MinWidth="96" Height="44" Padding="24,0"
+                                        Click="ChatSend_OnClick"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="매뉴얼 관리">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="300"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Background="{StaticResource BrushSidebar}"
+                            BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,0,1,0" Padding="16,20,16,16">
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                                <TextBlock Text="구조" Foreground="{StaticResource BrushMuted}"
+                                           FontSize="11" FontWeight="SemiBold" Margin="2,0,0,4"/>
+                                <TextBlock Text="카테고리" FontSize="20" FontWeight="SemiBold"/>
+                                <TextBlock Text="문서를 묶는 단위입니다" FontSize="12"
+                                           Foreground="{StaticResource BrushMuted}" Margin="0,6,0,0"/>
+                            </StackPanel>
+                            <UniformGrid DockPanel.Dock="Bottom" Rows="1" Columns="3" Margin="0,12,0,0">
+                                <Button Content="생성" Margin="0,0,6,0" Click="CategoryAdd_OnClick"/>
+                                <Button Content="수정" Margin="0,0,6,0" Click="CategoryRename_OnClick"/>
+                                <Button Content="삭제" Style="{StaticResource DangerOutlineButton}"
+                                        Click="CategoryDelete_OnClick"/>
+                            </UniformGrid>
+                            <ListBox x:Name="ManageCategoryList" Margin="0,8,0,0" DisplayMemberPath="Name"
+                                     SelectionChanged="ManageCategoryList_SelectionChanged"/>
+                        </DockPanel>
+                    </Border>
+
+                    <DockPanel Grid.Column="1" Margin="20,16,20,16">
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
+                            <Button Content="문서 업로드" Style="{StaticResource AccentButton}"
+                                    Margin="0,0,10,0" Padding="20,10" Click="Upload_OnClick"/>
+                            <Button Content="문서 삭제" Style="{StaticResource DangerOutlineButton}"
+                                    Margin="0,0,10,0" Click="DeleteDoc_OnClick"/>
+                            <Button Content="새로고침" Padding="18,10" Click="RefreshDocs_OnClick"/>
+                            <ProgressBar x:Name="UploadProgress" Width="200" Margin="20,0,0,0"
+                                         VerticalAlignment="Center" Visibility="Collapsed" IsIndeterminate="True"/>
+                            <TextBlock x:Name="UploadStatus" Margin="12,0,0,0" VerticalAlignment="Center"
+                                       Foreground="{StaticResource BrushMuted}" FontSize="12"/>
+                        </StackPanel>
+                        <Border Background="{StaticResource BrushSurface}"
+                                BorderBrush="{StaticResource BrushBorder}" BorderThickness="1"
+                                CornerRadius="12" Padding="0" ClipToBounds="True">
+                            <DataGrid x:Name="DocumentsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                                      SelectionMode="Single" CanUserAddRows="False"
+                                      BorderThickness="0" Background="Transparent">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="파일명" Binding="{Binding OriginalName}" Width="*"/>
+                                    <DataGridTextColumn Header="업로드 일자" Binding="{Binding UploadedAt}" Width="160"/>
+                                    <DataGridTextColumn Header="사이즈" Binding="{Binding SizeText}" Width="100"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                    </DockPanel>
+                </Grid>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</Window>

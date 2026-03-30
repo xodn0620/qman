@@ -1,0 +1,12 @@
+{
+  "llm": {
+    "provider": "openai",
+    "openAiApiKey": "",
+    "chatModel": "gpt-4o-mini",
+    "embeddingModel": "text-embedding-3-small",
+    "url": "https://api.openai.com/v1"
+  },
+  "sqliteVec": {
+    "dllPath": "native/sqlite3.dll"
+  }
+}

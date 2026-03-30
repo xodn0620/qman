@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\QMan.Core\QMan.Core.csproj" />
+    <ProjectReference Include="..\QMan.Data\QMan.Data.csproj" />
+    <ProjectReference Include="..\QMan.Llm\QMan.Llm.csproj" />
+    <ProjectReference Include="..\QMan.Rag\QMan.Rag.csproj" />
+    <ProjectReference Include="..\QMan.Ingestion\QMan.Ingestion.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+</Project>
