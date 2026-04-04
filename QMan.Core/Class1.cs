@@ -1,11 +1,12 @@
-using System.Text.Json;
-
 namespace QMan.Core;
 
 public enum LlmProvider
 {
     OpenAi,
-    Ollama
+    Ollama,
+    Claude,
+    GoogleAi,
+    AlibabaCloud
 }
 
 /// <summary>
@@ -51,7 +52,6 @@ public static class AppPaths
 
                 var baseDir = PortableRootDir;
                 if (File.Exists(Path.Combine(baseDir, "portable.flag"))) return true;
-                if (File.Exists(Path.Combine(baseDir, "config.json"))) return true;
             }
             catch
             {
@@ -82,14 +82,13 @@ public static class AppPaths
                 guessed = Directory.GetCurrentDirectory();
             }
 
-            // 3) 위로 올라가며 portable.flag/config.json 찾기
+            // 3) 위로 올라가며 portable.flag 찾기
             var cur = new DirectoryInfo(guessed);
             for (var i = 0; i < 6 && cur != null; i++)
             {
                 try
                 {
-                    if (File.Exists(Path.Combine(cur.FullName, "portable.flag")) ||
-                        File.Exists(Path.Combine(cur.FullName, "config.json")))
+                    if (File.Exists(Path.Combine(cur.FullName, "portable.flag")))
                         return cur.FullName;
                 }
                 catch
@@ -113,81 +112,59 @@ public sealed class AppConfig
     public LlmProvider LlmProvider { get; init; }
     public string ChatModel { get; init; } = string.Empty;
     public string EmbeddingModel { get; init; } = string.Empty;
+    /// <summary>제공자별 메인 API 키(OpenAI / Anthropic / DashScope).</summary>
     public string? OpenAiApiKey { get; init; }
+    /// <summary>Claude 전용: OpenAI 임베딩 API 키.</summary>
+    public string? EmbeddingApiKey { get; init; }
     public string? Url { get; init; }
     public int EmbeddingDimGuess { get; init; }
-    public string? SqliteVecDllPath { get; init; }
 
-    public static AppConfig Load()
+    /// <summary>app_kv(cfg.*)과 환경 변수를 합쳐 런타임 설정을 만듭니다.</summary>
+    public static AppConfig FromStoredValues(IReadOnlyDictionary<string, string> kv)
     {
         AppPaths.EnsureDirs();
 
-        // 1) 실행 폴더(AppHomeDir) 우선
-        var cfg1 = Path.Combine(AppPaths.AppHomeDir, "config.json");
-        // 2) 사용자 홈 fallback (기존 Java와 유사하게 유지하고 싶다면)
-        var cfg2 = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            "qman",
-            "config.json"
-        );
+        static string? FromKv(IReadOnlyDictionary<string, string> d, string key) =>
+            d.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
 
-        string json = "{}";
-        if (File.Exists(cfg1))
-        {
-            json = File.ReadAllText(cfg1);
-        }
-        else if (File.Exists(cfg2))
-        {
-            json = File.ReadAllText(cfg2);
-        }
-
-        var jsonOpts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var raw = JsonSerializer.Deserialize<RawConfig>(json, jsonOpts) ?? new RawConfig();
-
-        // 환경변수 우선
         var providerRaw = FirstNonEmpty(
             Environment.GetEnvironmentVariable("SMQ_LLM_PROVIDER"),
-            raw.Llm?.Provider,
-            "openai"
-        );
+            FromKv(kv, AppSettingsKeys.LlmProviderKey),
+            "openai");
 
-        var provider = ParseProvider(providerRaw);
+        var provider = ParseLlmProvider(providerRaw);
+
+        var ptag = AppSettingsKeys.ProviderTag(provider);
 
         var chatModel = FirstNonEmpty(
             Environment.GetEnvironmentVariable("SMQ_LLM_CHAT_MODEL"),
-            raw.Llm?.ChatModel
-        );
+            FromKv(kv, AppSettingsKeys.ProfileChatModel(ptag)),
+            FromKv(kv, AppSettingsKeys.ChatModel));
 
         var embeddingModel = FirstNonEmpty(
             Environment.GetEnvironmentVariable("SMQ_LLM_EMBEDDING_MODEL"),
-            raw.Llm?.EmbeddingModel
-        );
+            FromKv(kv, AppSettingsKeys.ProfileEmbeddingModel(ptag)),
+            FromKv(kv, AppSettingsKeys.EmbeddingModel));
 
         if (string.IsNullOrWhiteSpace(chatModel))
-            chatModel = provider == LlmProvider.Ollama ? "llama3.2" : "gpt-4o-mini";
+            chatModel = DefaultChatModel(provider);
 
         if (string.IsNullOrWhiteSpace(embeddingModel))
-            embeddingModel = provider == LlmProvider.Ollama ? "nomic-embed-text" : "text-embedding-3-small";
+            embeddingModel = DefaultEmbeddingModel(provider);
 
-        var apiKey = FirstNonEmpty(
+        var apiKey = ResolveMainApiKey(provider, kv);
+        var embedOnlyKey = FirstNonEmpty(
+            Environment.GetEnvironmentVariable("SMQ_EMBEDDING_API_KEY"),
             Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
-            raw.Llm?.OpenAiApiKey
-        );
+            FromKv(kv, AppSettingsKeys.ProfileClaudeEmbeddingApiKey),
+            FromKv(kv, AppSettingsKeys.EmbeddingApiKey));
 
         var url = FirstNonEmpty(
             Environment.GetEnvironmentVariable("SMQ_LLM_URL"),
-            raw.Llm?.Url
-        );
+            FromKv(kv, AppSettingsKeys.ProfileUrl(ptag)),
+            FromKv(kv, AppSettingsKeys.Url));
 
         var dimGuess = InferEmbeddingDimGuess(provider, embeddingModel);
-
-        // sqlite-vec DLL: 환경변수 → 자동 탐색
-        var vecDll = FirstNonEmpty(
-            Environment.GetEnvironmentVariable("SMQ_SQLITE_VEC_DLL"),
-            raw.SqliteVec?.DllPath
-        );
-        if (string.IsNullOrWhiteSpace(vecDll))
-            vecDll = GuessVecDllPath();
 
         return new AppConfig
         {
@@ -195,41 +172,145 @@ public sealed class AppConfig
             ChatModel = chatModel,
             EmbeddingModel = embeddingModel,
             OpenAiApiKey = apiKey,
+            EmbeddingApiKey = provider == LlmProvider.Claude ? embedOnlyKey : null,
             Url = url,
-            EmbeddingDimGuess = dimGuess,
-            SqliteVecDllPath = vecDll
+            EmbeddingDimGuess = dimGuess
         };
     }
 
-    private sealed class RawConfig
+    public static string DefaultChatModel(LlmProvider provider) =>
+        provider switch
+        {
+            LlmProvider.Ollama => "llama3.2",
+            LlmProvider.Claude => "claude-sonnet-4-20250514",
+            LlmProvider.GoogleAi => "gemini-2.5-flash-lite",
+            LlmProvider.AlibabaCloud => "qwen3-max",
+            _ => "gpt-4o-mini"
+        };
+
+    public static string DefaultEmbeddingModel(LlmProvider provider) =>
+        provider switch
+        {
+            LlmProvider.Ollama => "nomic-embed-text",
+            LlmProvider.Claude => "text-embedding-3-small",
+            LlmProvider.GoogleAi => "gemini-embedding-001",
+            LlmProvider.AlibabaCloud => "text-embedding-v3",
+            _ => "text-embedding-3-small"
+        };
+
+    private static string? ResolveMainApiKey(LlmProvider provider, IReadOnlyDictionary<string, string> kv)
     {
-        public LlmSection? Llm { get; set; }
-        public SqliteVecSection? SqliteVec { get; set; }
+        static string? K(IReadOnlyDictionary<string, string> d, string key) =>
+            d.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
+
+        var ptag = AppSettingsKeys.ProviderTag(provider);
+        var fromFile = FirstNonEmpty(
+            K(kv, AppSettingsKeys.ProfileApiKey(ptag)),
+            K(kv, AppSettingsKeys.ApiKey),
+            K(kv, AppSettingsKeys.OpenAiApiKey));
+
+        return provider switch
+        {
+            LlmProvider.OpenAi => FirstNonEmpty(
+                Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
+                Environment.GetEnvironmentVariable("SMQ_LLM_API_KEY"),
+                fromFile),
+            LlmProvider.Claude => FirstNonEmpty(
+                Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY"),
+                Environment.GetEnvironmentVariable("SMQ_LLM_API_KEY"),
+                fromFile),
+            LlmProvider.GoogleAi => FirstNonEmpty(
+                Environment.GetEnvironmentVariable("GEMINI_API_KEY"),
+                Environment.GetEnvironmentVariable("GOOGLE_API_KEY"),
+                Environment.GetEnvironmentVariable("SMQ_LLM_API_KEY"),
+                fromFile),
+            LlmProvider.AlibabaCloud => FirstNonEmpty(
+                Environment.GetEnvironmentVariable("DASHSCOPE_API_KEY"),
+                Environment.GetEnvironmentVariable("SMQ_LLM_API_KEY"),
+                fromFile),
+            _ => fromFile
+        };
     }
 
-    private sealed class LlmSection
+    /// <summary>
+    /// sqlite-vec DLL을 찾습니다.
+    /// %USERPROFILE%\qman\native, 실행 폴더, 실행 폴더의 상위(저장소 루트의 native 등)를 순서대로 봅니다.
+    /// </summary>
+    public static string? TryFindNativeVecDllPath()
     {
-        public string? Provider { get; set; }
-        public string? ChatModel { get; set; }
-        public string? EmbeddingModel { get; set; }
-        public string? OpenAiApiKey { get; set; }
-        public string? Url { get; set; }
+        var fileNames = new[]
+        {
+            "sqlite-vec.dll",
+            "sqlite_vec.dll",
+            "vec0.dll",
+            "vel0.dll",
+            "sqlitevec.dll"
+        };
+
+        foreach (var root in BuildNativeVecSearchRoots())
+        {
+            if (string.IsNullOrWhiteSpace(root))
+                continue;
+            foreach (var name in fileNames)
+            {
+                try
+                {
+                    var full = Path.Combine(root, name);
+                    if (File.Exists(full))
+                        return full;
+                }
+                catch
+                {
+                    // ignore
+                }
+            }
+        }
+
+        return null;
     }
 
-    private sealed class SqliteVecSection
+    private static List<string> BuildNativeVecSearchRoots()
     {
-        public string? DllPath { get; set; }
+        var list = new List<string> { AppPaths.NativeDir };
+        try
+        {
+            var baseDir = AppContext.BaseDirectory;
+            list.Add(Path.Combine(baseDir, "native"));
+            list.Add(baseDir);
+
+            var dir = new DirectoryInfo(baseDir);
+            for (var depth = 0; depth < 14 && dir != null; depth++)
+            {
+                var nativeSub = Path.Combine(dir.FullName, "native");
+                if (Directory.Exists(nativeSub))
+                    list.Add(nativeSub);
+                dir = dir.Parent;
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+
+        return list;
     }
+
+    /// <summary>sqlite-vec를 두면 좋은 기본 폴더(안내용).</summary>
+    public static string NativeVecHintDir => AppPaths.NativeDir;
 
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
 
-    private static LlmProvider ParseProvider(string? raw)
+    public static LlmProvider ParseLlmProvider(string? raw)
     {
         var v = (raw ?? string.Empty).Trim().ToLowerInvariant();
         return v switch
         {
             "ollama" => LlmProvider.Ollama,
+            "claude" or "anthropic" => LlmProvider.Claude,
+            "googleai" or "google" or "google_ai" or "gemini" => LlmProvider.GoogleAi,
+            "alibabacloud" or "alibaba" or "alibaba_cloud" or "qwen3" or "qwen" or "dashscope" or "dsplayground" =>
+                LlmProvider.AlibabaCloud,
             "openai" or "oa" => LlmProvider.OpenAi,
             _ => LlmProvider.OpenAi
         };
@@ -237,43 +318,38 @@ public sealed class AppConfig
 
     private static int InferEmbeddingDimGuess(LlmProvider provider, string embeddingModel)
     {
-        if (provider == LlmProvider.OpenAi)
+        var m = (embeddingModel ?? string.Empty).Trim();
+
+        if (provider is LlmProvider.OpenAi or LlmProvider.Claude)
         {
-            var m = (embeddingModel ?? string.Empty).Trim();
             if (m.Equals("text-embedding-3-large", StringComparison.OrdinalIgnoreCase)) return 3072;
             if (m.Equals("text-embedding-3-small", StringComparison.OrdinalIgnoreCase)) return 1536;
             if (m.Equals("text-embedding-ada-002", StringComparison.OrdinalIgnoreCase)) return 1536;
             return 1536;
         }
 
-        // Ollama 대표값
-        return 768;
-    }
-
-    private static string GuessVecDllPath()
-    {
-        var dir = AppPaths.NativeDir;
-        var candidates = new[]
+        if (provider == LlmProvider.AlibabaCloud)
         {
-            Path.Combine(dir, "sqlite-vec.dll"),
-            Path.Combine(dir, "sqlite_vec.dll"),
-            Path.Combine(dir, "vec0.dll"),
-            Path.Combine(dir, "sqlitevec.dll")
-        };
-
-        foreach (var c in candidates)
-        {
-            try
-            {
-                if (File.Exists(c)) return c;
-            }
-            catch
-            {
-                // ignore
-            }
+            if (m.Contains("v4", StringComparison.OrdinalIgnoreCase)) return 1024;
+            if (m.Contains("v3", StringComparison.OrdinalIgnoreCase)) return 1024;
+            if (m.Contains("v2", StringComparison.OrdinalIgnoreCase)) return 1536;
+            return 1024;
         }
 
-        return Path.Combine(dir, "sqlite-vec.dll");
+        // GoogleAiClient가 embedContent에 output_dimensionality=768을 보냄.
+        if (provider == LlmProvider.GoogleAi)
+            return 768;
+
+        // Ollama: 모델별 차원(추정). 불일치 시 검색 단계에서 EnsureVecTableDim(실제 길이)로 보정됨.
+        if (m.Contains("minilm", StringComparison.OrdinalIgnoreCase)) return 384;
+        if (m.Contains("mxbai", StringComparison.OrdinalIgnoreCase)) return 1024;
+        if (m.Contains("bge-m3", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("bge-large", StringComparison.OrdinalIgnoreCase)) return 1024;
+        if (m.Contains("nomic", StringComparison.OrdinalIgnoreCase)) return 768;
+        if (m.Contains("snowflake", StringComparison.OrdinalIgnoreCase) &&
+            m.Contains("xs", StringComparison.OrdinalIgnoreCase)) return 384;
+        if (m.Contains("snowflake", StringComparison.OrdinalIgnoreCase)) return 1024;
+        return 768;
     }
 }
 

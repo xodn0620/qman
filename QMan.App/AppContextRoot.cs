@@ -14,6 +14,8 @@ public sealed class AppContextRoot : IDisposable
 
     public AppConfig Config { get; }
     public SqliteDb Db { get; }
+    public AppSettingsDao Settings { get; }
+    public bool NeedsInitialSetup { get; }
     public CategoryDao Categories { get; }
     public DocumentDao Documents { get; }
     public ChunkDao Chunks { get; }
@@ -26,8 +28,10 @@ public sealed class AppContextRoot : IDisposable
 
     private AppContextRoot()
     {
-        Config = AppConfig.Load();
-        Db = new SqliteDb(Config);
+        Db = new SqliteDb();
+        Config = Db.Config;
+        Settings = new AppSettingsDao(Db.Connection);
+        NeedsInitialSetup = !AppSettingsDao.IsSetupComplete(Db.Connection);
 
         Categories = new CategoryDao(Db.Connection);
         Documents = new DocumentDao(Db.Connection);
@@ -38,6 +42,9 @@ public sealed class AppContextRoot : IDisposable
         Llm = Config.LlmProvider switch
         {
             LlmProvider.Ollama => new OllamaClient(Config),
+            LlmProvider.Claude => new ClaudeClient(Config),
+            LlmProvider.GoogleAi => new GoogleAiClient(Config),
+            LlmProvider.AlibabaCloud => new AlibabaCloudClient(Config),
             _ => new OpenAiClient(Config)
         };
 

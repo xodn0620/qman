@@ -105,7 +105,7 @@ public sealed class OpenAiClient : ILlmClient
     {
         if (string.IsNullOrWhiteSpace(_config.OpenAiApiKey))
             throw new InvalidOperationException(
-                "OpenAI API Key가 설정되지 않았습니다. config.json 또는 환경변수 OPENAI_API_KEY를 설정해주세요.");
+                "API 키가 설정되지 않았습니다. 설정에서 API 키를 입력하거나 환경변수 OPENAI_API_KEY를 설정해 주세요.");
     }
 
     private string ResolveChatUrl()

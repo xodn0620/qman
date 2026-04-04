@@ -112,9 +112,9 @@ public sealed class RagService
                 _db.EnsureVecTableDim(embedding.Length);
                 _vecDao.Upsert(chunkId, json);
             }
-            catch
+            catch (Exception ex)
             {
-                _db.DisableVec();
+                _db.DisableVec(ex.Message);
             }
         }
     }

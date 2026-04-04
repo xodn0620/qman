@@ -11,50 +11,134 @@
     <DockPanel LastChildFill="True">
         <!-- 하단 상태 -->
         <Border DockPanel.Dock="Bottom" Height="34" Background="{StaticResource BrushSidebar}"
-                BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,1,0,0" Padding="16,0">
-            <TextBlock x:Name="StatusVec" VerticalAlignment="Center"
-                       Foreground="{StaticResource BrushMuted}" FontSize="12"/>
+                BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,1,0,0" Padding="12,0,8,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusVec" Grid.Column="0" VerticalAlignment="Center"
+                           Foreground="{StaticResource BrushMuted}" FontSize="12" Margin="4,0,8,0"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button x:Name="StatusSettingsButton" Grid.Column="1" Width="34" Height="28"
+                        Padding="0" Background="Transparent" BorderThickness="0"
+                        Cursor="Hand" ToolTip="설정"
+                        Click="StatusSettings_OnClick" VerticalAlignment="Center"
+                        FontFamily="Segoe MDL2 Assets" FontSize="15"
+                        Foreground="{StaticResource BrushMuted}"
+                        Content="&#xE713;"/>
+            </Grid>
         </Border>
 
         <TabControl x:Name="MainTabs" Padding="0">
             <TabItem Header="채팅">
                 <Grid Margin="0">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="280"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="280" MinWidth="160" MaxWidth="720"/>
+                        <ColumnDefinition Width="5"/>
+                        <ColumnDefinition Width="*" MinWidth="320"/>
                     </Grid.ColumnDefinitions>
 
                     <!-- 사이드: 카테고리 -->
                     <Border Grid.Column="0" Background="{StaticResource BrushSidebar}"
                             BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,0,1,0" Padding="16,20,16,16">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,16">
-                                <TextBlock Text="질문 범위" Foreground="{StaticResource BrushMuted}"
-                                           FontSize="11" FontWeight="SemiBold" Margin="2,0,0,4"/>
-                                <TextBlock Text="카테고리" FontSize="20" FontWeight="SemiBold"
-                                           Foreground="{StaticResource BrushText}"/>
-                                <TextBlock Text="검색·답변에 사용할 매뉴얼 그룹" FontSize="12"
-                                           Foreground="{StaticResource BrushMuted}" Margin="0,6,0,0"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                            <ListBox x:Name="ChatCategoryList" Margin="0,4,0,0"
-                                     DisplayMemberPath="Name"/>
-                        </DockPanel>
+                        <Grid>
+                            <ScrollViewer x:Name="ChatCategoryScroll"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled"
+                                          VerticalAlignment="Stretch"
+                                          Padding="0">
+                                <ListBox x:Name="ChatCategoryList"
+                                         AllowDrop="True"
+                                         SelectionChanged="ChatCategoryList_OnSelectionChanged"
+                                         PreviewMouseLeftButtonDown="ChatCategoryList_OnPreviewMouseLeftButtonDown"
+                                         PreviewMouseLeftButtonUp="ChatCategoryList_OnPreviewMouseLeftButtonUp"
+                                         MouseMove="ChatCategoryList_OnMouseMove"
+                                         DragOver="ChatCategoryList_OnDragOver"
+                                         DragLeave="ChatCategoryList_OnDragLeave"
+                                         Drop="ChatCategoryList_OnDrop">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding Name}"
+                                                       HorizontalAlignment="Stretch"/>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </ScrollViewer>
+                            <!-- 드래그 시 삽입 위치 밑줄 (ListBox 위에 겹침, 마우스 이벤트 통과) -->
+                            <Canvas x:Name="ChatCategoryDropOverlay"
+                                    IsHitTestVisible="False"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Stretch"
+                                    ClipToBounds="True">
+                                <Border x:Name="ChatCategoryDropIndicator"
+                                        Height="2"
+                                        CornerRadius="1"
+                                        SnapsToDevicePixels="True"
+                                        Background="{StaticResource BrushAccent}"
+                                        Opacity="0.95"
+                                        Visibility="Collapsed"/>
+                            </Canvas>
+                            <TextBlock x:Name="ChatCategoryEmptyHint"
+                                       Text="매뉴얼 관리 탭에서 카테고리를 생성하고 채팅을 시작하세요."
+                                       TextWrapping="Wrap"
+                                       Foreground="{StaticResource BrushMuted}"
+                                       FontSize="13"
+                                       LineHeight="20"
+                                       VerticalAlignment="Top"
+                                       Visibility="Collapsed"/>
+                        </Grid>
                     </Border>
 
+                    <GridSplitter Grid.Column="1" Style="{StaticResource SidebarGridSplitterStyle}"/>
+
                     <!-- 메인 채팅 -->
-                    <Grid Grid.Column="1">
+                    <Grid Grid.Column="2">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="*"/>
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <Border Grid.Row="0" Background="{StaticResource BrushBg}" Padding="20,16,20,12">
-                            <ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto"
-                                          HorizontalScrollBarVisibility="Disabled">
-                                <StackPanel x:Name="MessagesPanel"/>
-                            </ScrollViewer>
-                        </Border>
+                        <Grid Grid.Row="0">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <!-- 대화 지우기: 카테고리별 세션만 비움(문서·DB는 유지). 로그와 같은 열 상단이 맥락이 분명함. -->
+                            <DockPanel Grid.Row="0" Margin="20,12,20,6" LastChildFill="False">
+                                <TextBlock DockPanel.Dock="Left" Text="대화" VerticalAlignment="Center"
+                                           Foreground="{StaticResource BrushMuted}" FontSize="12"/>
+                                <Button x:Name="ChatClearButton" DockPanel.Dock="Right" Content="대화 지우기"
+                                        Style="{StaticResource DangerOutlineButton}"
+                                        MinWidth="104" Height="32" Padding="14,4" FontSize="12"
+                                        Click="ChatClear_OnClick"
+                                        ToolTip="선택한 카테고리의 채팅 기록만 삭제합니다. 매뉴얼 문서는 삭제되지 않습니다."/>
+                            </DockPanel>
+                            <Grid Grid.Row="1">
+                            <Border Background="{StaticResource BrushBg}" Padding="20,8,20,12">
+                                <ScrollViewer x:Name="ChatScroll" VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel x:Name="MessagesPanel"/>
+                                </ScrollViewer>
+                            </Border>
+                            <Border x:Name="ChatEmptyState" Background="{StaticResource BrushBg}" Padding="28,20,28,20">
+                                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="420">
+                                    <Image MaxHeight="200" Stretch="Uniform"
+                                           RenderOptions.BitmapScalingMode="HighQuality"
+                                           Source="pack://application:,,,/Assets/qman.png"/>
+                                    <TextBlock Text="Q-Man에 오신 것을 환영합니다"
+                                               FontSize="20" FontWeight="SemiBold"
+                                               Foreground="{StaticResource BrushAccentDeep}"
+                                               HorizontalAlignment="Center" Margin="0,18,0,10"
+                                               TextAlignment="Center"/>
+                                    <TextBlock TextWrapping="Wrap" TextAlignment="Center" FontSize="13.5"
+                                               Foreground="{StaticResource BrushMuted}" LineHeight="22"
+                                               Text="왼쪽에서 카테고리를 선택한 뒤, 하단 입력란에 질문을 입력해 보세요.&#x0a;문서가 없다면 「매뉴얼 관리」 탭에서 업로드할 수 있습니다."/>
+                                </StackPanel>
+                            </Border>
+                            </Grid>
+                        </Grid>
 
                         <Border Grid.Row="1" Background="{StaticResource BrushSurface}"
                                 BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,1,0,0"
@@ -75,8 +159,8 @@
                                              VerticalAlignment="Stretch"
                                              VerticalContentAlignment="Center"
                                              AcceptsReturn="False"
-                                             Foreground="#F0F2F7"
-                                             CaretBrush="#F0F2F7"
+                                             Foreground="{StaticResource BrushText}"
+                                             CaretBrush="{StaticResource BrushText}"
                                              PreviewKeyDown="ChatInput_OnPreviewKeyDown"/>
                                 </Border>
                                 <Button x:Name="ChatSendButton" Grid.Column="1" Content="전송"
@@ -92,38 +176,41 @@
             <TabItem Header="매뉴얼 관리">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="300"/>
-                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="280" MinWidth="160" MaxWidth="720"/>
+                        <ColumnDefinition Width="5"/>
+                        <ColumnDefinition Width="*" MinWidth="320"/>
                     </Grid.ColumnDefinitions>
 
                     <Border Grid.Column="0" Background="{StaticResource BrushSidebar}"
                             BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,0,1,0" Padding="16,20,16,16">
                         <DockPanel>
-                            <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                                <TextBlock Text="구조" Foreground="{StaticResource BrushMuted}"
-                                           FontSize="11" FontWeight="SemiBold" Margin="2,0,0,4"/>
-                                <TextBlock Text="카테고리" FontSize="20" FontWeight="SemiBold"/>
-                                <TextBlock Text="문서를 묶는 단위입니다" FontSize="12"
-                                           Foreground="{StaticResource BrushMuted}" Margin="0,6,0,0"/>
-                            </StackPanel>
                             <UniformGrid DockPanel.Dock="Bottom" Rows="1" Columns="3" Margin="0,12,0,0">
                                 <Button Content="생성" Margin="0,0,6,0" Click="CategoryAdd_OnClick"/>
                                 <Button Content="수정" Margin="0,0,6,0" Click="CategoryRename_OnClick"/>
                                 <Button Content="삭제" Style="{StaticResource DangerOutlineButton}"
                                         Click="CategoryDelete_OnClick"/>
                             </UniformGrid>
-                            <ListBox x:Name="ManageCategoryList" Margin="0,8,0,0" DisplayMemberPath="Name"
-                                     SelectionChanged="ManageCategoryList_SelectionChanged"/>
+                            <ListBox x:Name="ManageCategoryList" Margin="0,8,0,0"
+                                     SelectionChanged="ManageCategoryList_SelectionChanged">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                                   ToolTip="{Binding Name}"
+                                                   HorizontalAlignment="Stretch"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
                         </DockPanel>
                     </Border>
 
-                    <DockPanel Grid.Column="1" Margin="20,16,20,16">
+                    <GridSplitter Grid.Column="1" Style="{StaticResource SidebarGridSplitterStyle}"/>
+
+                    <DockPanel Grid.Column="2" Margin="20,16,20,16">
                         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,14">
                             <Button Content="문서 업로드" Style="{StaticResource AccentButton}"
                                     Margin="0,0,10,0" Padding="20,10" Click="Upload_OnClick"/>
                             <Button Content="문서 삭제" Style="{StaticResource DangerOutlineButton}"
                                     Margin="0,0,10,0" Click="DeleteDoc_OnClick"/>
-                            <Button Content="새로고침" Padding="18,10" Click="RefreshDocs_OnClick"/>
                             <ProgressBar x:Name="UploadProgress" Width="200" Margin="20,0,0,0"
                                          VerticalAlignment="Center" Visibility="Collapsed" IsIndeterminate="True"/>
                             <TextBlock x:Name="UploadStatus" Margin="12,0,0,0" VerticalAlignment="Center"

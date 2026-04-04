@@ -8,9 +8,27 @@
     <ProjectReference Include="..\QMan.Ingestion\QMan.Ingestion.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Resource Include="Assets\**\*.png" />
+  </ItemGroup>
+
+  <!-- sqlite-vec DLL을 QMan.App\native\ 에 두면 빌드 출력으로 복사되어 벡터 검색이 켜집니다. -->
+  <ItemGroup>
+    <None Update="native\**\*.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="README.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- 실행 파일 이름: 배포 폴더에서 찾기 쉽도록 QMan.exe (네임스페이스는 QMan.App 유지) -->
+  <!-- 오프라인 ZIP: dotnet publish -p:PublishProfile=Portable-win-x64 → dist\QMan-portable-win-x64\ -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>QMan</AssemblyName>
+    <RootNamespace>QMan.App</RootNamespace>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>

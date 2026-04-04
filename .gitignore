@@ -1,0 +1,10 @@
+bin/
+obj/
+dist/
+.vs/
+*.user
+
+# 로컬 SQLite 데이터(개발기)
+data/*.db
+data/*.db-shm
+data/*.db-wal
