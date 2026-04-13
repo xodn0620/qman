@@ -77,7 +77,7 @@ public partial class MainWindow : Window
         var ctx = AppContextRoot.Instance;
         if (ctx.Db.VecEnabled)
         {
-            StatusVec.Text = "벡터 검색: 사용 (native)";
+            StatusVec.Text = "벡터 검색: 사용 (sqlite-vec)";
             StatusVec.ToolTip = null;
             return;
         }

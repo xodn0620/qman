@@ -42,7 +42,7 @@ public sealed class SqliteDb : IDisposable
         if (vecDll is null)
         {
             VecDisabledReason =
-                $"sqlite-vec DLL 없음 → {AppConfig.NativeVecHintDir}, 앱 출력 폴더\\native, 또는 소스/저장소 상위의 native 폴더에 sqlite-vec.dll·vec0.dll 등 배치";
+                $"sqlite-vec 미포함 빌드이거나 캐시에 없음 → 빌드 시 임베드 필요. 캐시: {AppConfig.SqliteVecCacheHintDir}";
         }
         else if (!TryLoadSqliteVec(Connection, vecDll, out var loadErr))
         {

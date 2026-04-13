@@ -38,4 +38,4 @@ finally {
 Write-Host ""
 Write-Host "출력: $outDir"
 Write-Host "배포: 위 폴더를 ZIP으로 압축해 반입한 뒤, 압축 해제 폴더의 QMan.exe 를 실행하면 됩니다."
-Write-Host "벡터검색: sqlite-vec DLL은 빌드 전 QMan.App\native\ 에 두면 출력에 포함됩니다."
+Write-Host "벡터검색: 빌드 전 QMan.App\native\ 에 sqlite-vec DLL을 두면 exe에 임베드, 실행 시 %LocalAppData%\QMan\vec\ 로 풀립니다."

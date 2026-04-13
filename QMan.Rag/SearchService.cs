@@ -37,7 +37,12 @@ public sealed class SearchService
                 _db.EnsureVecTableDim(queryEmbedding.Length);
                 var hits = _vec.Knn(queryJson, topK, categoryId);
                 if (hits.Count > 0)
-                    return LookupChunksForVecHits(hits);
+                {
+                    var resolved = LookupChunksForVecHits(hits);
+                    // vec 인덱스와 DB 불일치·삭제된 청크 등으로 매핑이 비면 코사인 폴백
+                    if (resolved.Count > 0)
+                        return resolved;
+                }
             }
             catch
             {

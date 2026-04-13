@@ -12,11 +12,18 @@
     <Resource Include="Assets\**\*.png" />
   </ItemGroup>
 
-  <!-- sqlite-vec DLL을 QMan.App\native\ 에 두면 빌드 출력으로 복사되어 벡터 검색이 켜집니다. -->
+  <!-- sqlite-vec: QMan.App\native\ 에 DLL을 두면 어셈블리에만 임베드(publish 폴더에는 native 미생성). 실행 시 %LocalAppData%\QMan\vec\ 로 풀림. -->
   <ItemGroup>
-    <None Update="native\**\*.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <_BundledNativeDll Include="native\sqlite-vec.dll" Condition="Exists('native\sqlite-vec.dll')" />
+    <_BundledNativeDll Include="native\sqlite_vec.dll" Condition="Exists('native\sqlite_vec.dll')" />
+    <_BundledNativeDll Include="native\vec0.dll" Condition="Exists('native\vec0.dll')" />
+    <_BundledNativeDll Include="native\vel0.dll" Condition="Exists('native\vel0.dll')" />
+    <_BundledNativeDll Include="native\sqlitevec.dll" Condition="Exists('native\sqlitevec.dll')" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="@(_BundledNativeDll)">
+      <LogicalName>QMan.BundledNative.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
     <None Update="README.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

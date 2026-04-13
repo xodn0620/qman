@@ -11,96 +11,43 @@ public enum LlmProvider
 
 /// <summary>
 /// 앱에서 사용하는 경로/폴더 계산 유틸리티 (Java AppPaths 대응).
+/// 항상 실행 파일이 있는 폴더가 앱 홈 — qman.db 는 그 아래 data\qman.db 만 사용합니다(다른 경로 조회·복사 없음).
 /// </summary>
 public static class AppPaths
 {
+    /// <summary>실행 어셈블리 기준 디렉터리(배포 시 QMan.exe와 같은 폴더).</summary>
     public static string AppHomeDir
     {
         get
         {
-            if (IsPortableMode)
-                return PortableRootDir;
-
-            var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(userHome, "qman");
+            try
+            {
+                return AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            }
+            catch
+            {
+                return Directory.GetCurrentDirectory();
+            }
         }
     }
 
     public static string DataDir => Path.Combine(AppHomeDir, "data");
-    public static string DocsDir => Path.Combine(AppHomeDir, "docs");
-    public static string NativeDir => Path.Combine(AppHomeDir, "native");
-    public static string LogsDir => Path.Combine(AppHomeDir, "logs");
     public static string DbPath => Path.Combine(DataDir, "qman.db");
+
+    /// <summary>
+    /// 임베드된 sqlite-vec 네이티브 DLL을 풀어두는 경로(QMan.exe 옆이 아님).
+    /// SQLite LoadExtension은 Windows에서 파일 경로가 필요해 메모리만으로는 로드할 수 없습니다.
+    /// </summary>
+    public static string SqliteVecCacheDir =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "QMan",
+            "vec");
 
     public static void EnsureDirs()
     {
         Directory.CreateDirectory(AppHomeDir);
         Directory.CreateDirectory(DataDir);
-        Directory.CreateDirectory(NativeDir);
-        Directory.CreateDirectory(LogsDir);
-    }
-
-    private static bool IsPortableMode
-    {
-        get
-        {
-            try
-            {
-                var prop = Environment.GetEnvironmentVariable("SMQ_PORTABLE") ?? string.Empty;
-                if (prop.Equals("true", StringComparison.OrdinalIgnoreCase))
-                    return true;
-
-                var baseDir = PortableRootDir;
-                if (File.Exists(Path.Combine(baseDir, "portable.flag"))) return true;
-            }
-            catch
-            {
-                // ignore
-            }
-
-            return false;
-        }
-    }
-
-    private static string PortableRootDir
-    {
-        get
-        {
-            // 1) 강제 지정
-            var forced = Environment.GetEnvironmentVariable("SMQ_PORTABLE_ROOT");
-            if (!string.IsNullOrWhiteSpace(forced))
-                return forced;
-
-            // 2) 코드 위치 기반 추정
-            string guessed;
-            try
-            {
-                guessed = AppContext.BaseDirectory;
-            }
-            catch
-            {
-                guessed = Directory.GetCurrentDirectory();
-            }
-
-            // 3) 위로 올라가며 portable.flag 찾기
-            var cur = new DirectoryInfo(guessed);
-            for (var i = 0; i < 6 && cur != null; i++)
-            {
-                try
-                {
-                    if (File.Exists(Path.Combine(cur.FullName, "portable.flag")))
-                        return cur.FullName;
-                }
-                catch
-                {
-                    // ignore
-                }
-
-                cur = cur.Parent;
-            }
-
-            return guessed;
-        }
     }
 }
 
@@ -233,8 +180,7 @@ public sealed class AppConfig
     }
 
     /// <summary>
-    /// sqlite-vec DLL을 찾습니다.
-    /// %USERPROFILE%\qman\native, 실행 폴더, 실행 폴더의 상위(저장소 루트의 native 등)를 순서대로 봅니다.
+    /// sqlite-vec DLL 경로를 찾습니다. 임베드 풀림 캐시(%LocalAppData%\QMan\vec\)만 봅니다.
     /// </summary>
     public static string? TryFindNativeVecDllPath()
     {
@@ -247,56 +193,26 @@ public sealed class AppConfig
             "sqlitevec.dll"
         };
 
-        foreach (var root in BuildNativeVecSearchRoots())
+        var root = AppPaths.SqliteVecCacheDir;
+        foreach (var name in fileNames)
         {
-            if (string.IsNullOrWhiteSpace(root))
-                continue;
-            foreach (var name in fileNames)
+            try
             {
-                try
-                {
-                    var full = Path.Combine(root, name);
-                    if (File.Exists(full))
-                        return full;
-                }
-                catch
-                {
-                    // ignore
-                }
+                var full = Path.Combine(root, name);
+                if (File.Exists(full))
+                    return full;
+            }
+            catch
+            {
+                // ignore
             }
         }
 
         return null;
     }
 
-    private static List<string> BuildNativeVecSearchRoots()
-    {
-        var list = new List<string> { AppPaths.NativeDir };
-        try
-        {
-            var baseDir = AppContext.BaseDirectory;
-            list.Add(Path.Combine(baseDir, "native"));
-            list.Add(baseDir);
-
-            var dir = new DirectoryInfo(baseDir);
-            for (var depth = 0; depth < 14 && dir != null; depth++)
-            {
-                var nativeSub = Path.Combine(dir.FullName, "native");
-                if (Directory.Exists(nativeSub))
-                    list.Add(nativeSub);
-                dir = dir.Parent;
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-
-        return list;
-    }
-
-    /// <summary>sqlite-vec를 두면 좋은 기본 폴더(안내용).</summary>
-    public static string NativeVecHintDir => AppPaths.NativeDir;
+    /// <summary>sqlite-vec DLL 캐시 경로(안내용).</summary>
+    public static string SqliteVecCacheHintDir => AppPaths.SqliteVecCacheDir;
 
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
