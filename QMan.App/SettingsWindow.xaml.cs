@@ -12,6 +12,7 @@ public partial class SettingsWindow : Window
     private bool _uiReady;
     private bool _allowClose;
     private Dictionary<string, LlmProviderFormState> _stateByTag = new(StringComparer.OrdinalIgnoreCase);
+    private string _loadedProfileTag = "openai";
 
     public bool FirstRun { get; init; }
 
@@ -30,40 +31,46 @@ public partial class SettingsWindow : Window
         var kv = ctx.Settings.LoadAll();
         _stateByTag = AppSettingsDao.LoadProviderFormStates(kv);
 
-        _uiReady = false;
-        ProviderCombo.SelectedIndex = ctx.Config.LlmProvider switch
-        {
-            LlmProvider.Ollama => 1,
-            LlmProvider.Claude => 2,
-            LlmProvider.GoogleAi => 3,
-            LlmProvider.AlibabaCloud => 4,
-            _ => 0
-        };
-        _uiReady = true;
+        var storedProv = AppConfig.ParseLlmProvider(
+            kv.TryGetValue(AppSettingsKeys.LlmProviderKey, out var pt) ? pt : "openai");
+        _loadedProfileTag = AppSettingsKeys.ProviderTag(storedProv);
 
-        LoadStateToForm(GetSelectedProviderTag());
-        ApplyProviderFields();
+        _uiReady = false;
+        LoadStateToForm(_loadedProfileTag);
+        _uiReady = true;
+        RefreshInferredPanels();
     }
 
-    private void ProviderCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void FormInferenceFields_OnTextChanged(object sender, TextChangedEventArgs e)
     {
         if (!_uiReady)
             return;
-        if (e.RemovedItems.Count > 0 && e.RemovedItems[0] is ComboBoxItem oldItem && oldItem.Tag is string oldTag)
-            FlushFormToState(oldTag);
-        if (e.AddedItems.Count > 0 && e.AddedItems[0] is ComboBoxItem newItem && newItem.Tag is string newTag)
-            LoadStateToForm(newTag);
-        ApplyProviderFields();
+        RefreshInferredPanels();
     }
 
-    private void FlushFormToState(string tag)
+    private void RefreshInferredPanels()
     {
-        var s = _stateByTag[tag];
-        s.ChatModel = ChatModelBox.Text.Trim();
-        s.EmbeddingModel = EmbeddingModelBox.Text.Trim();
-        s.Url = UrlBox.Text.Trim();
-        s.MainApiKey = ApiKeyBox.Text.Trim();
-        s.ClaudeEmbeddingApiKey = EmbeddingApiKeyBox.Text.Trim();
+        var p = LlmEndpointInference.Infer(
+            UrlBox.Text.Trim(),
+            ApiKeyBox.Text.Trim(),
+            EmbeddingApiKeyBox.Text.Trim());
+
+        PanelEmbeddingApiKey.Visibility = p == LlmProvider.Claude ? Visibility.Visible : Visibility.Collapsed;
+
+        InferenceHint.Text = p switch
+        {
+            LlmProvider.Ollama =>
+                "추론: Ollama — URL 비우면 http://localhost:11434 , API 키 없이 로컬 사용 가능.",
+            LlmProvider.OpenAi =>
+                "추론: OpenAI 호환 — URL 비우면 https://api.openai.com/v1 , 채팅·임베딩에 API 키가 필요합니다.",
+            LlmProvider.Claude =>
+                "추론: Anthropic — 채팅 키(sk-ant…)와 OpenAI 임베딩 키가 필요합니다.",
+            LlmProvider.GoogleAi =>
+                "추론: Google AI — API 키가 필요합니다.",
+            LlmProvider.AlibabaCloud =>
+                "추론: DashScope — API 키가 필요합니다.",
+            _ => ""
+        };
     }
 
     private void LoadStateToForm(string tag)
@@ -76,81 +83,27 @@ public partial class SettingsWindow : Window
         EmbeddingApiKeyBox.Text = s.ClaudeEmbeddingApiKey;
     }
 
-    private string GetSelectedProviderTag()
+    private void FlushFormToState(string tag)
     {
-        if (ProviderCombo.SelectedItem is ComboBoxItem it && it.Tag is string s)
-            return s;
-        return "openai";
-    }
-
-    private void ApplyProviderFields()
-    {
-        switch (GetSelectedProviderTag())
-        {
-            case "ollama":
-                PanelApiKey.Visibility = Visibility.Collapsed;
-                PanelEmbeddingApiKey.Visibility = Visibility.Collapsed;
-                PanelUrl.Visibility = Visibility.Visible;
-                ChatModelBox.IsEnabled = true;
-                EmbeddingModelBox.IsEnabled = true;
-                UrlBox.IsEnabled = true;
-                break;
-            case "openai":
-                PanelApiKey.Visibility = Visibility.Visible;
-                PanelEmbeddingApiKey.Visibility = Visibility.Collapsed;
-                PanelUrl.Visibility = Visibility.Visible;
-                ChatModelBox.IsEnabled = true;
-                EmbeddingModelBox.IsEnabled = true;
-                UrlBox.IsEnabled = true;
-                break;
-            case "claude":
-                PanelApiKey.Visibility = Visibility.Visible;
-                PanelEmbeddingApiKey.Visibility = Visibility.Visible;
-                PanelUrl.Visibility = Visibility.Collapsed;
-                ChatModelBox.IsEnabled = true;
-                EmbeddingModelBox.IsEnabled = true;
-                UrlBox.IsEnabled = false;
-                break;
-            case "googleai":
-                PanelApiKey.Visibility = Visibility.Visible;
-                PanelEmbeddingApiKey.Visibility = Visibility.Collapsed;
-                PanelUrl.Visibility = Visibility.Visible;
-                ChatModelBox.IsEnabled = true;
-                EmbeddingModelBox.IsEnabled = true;
-                UrlBox.IsEnabled = true;
-                break;
-            case "alibabacloud":
-                PanelApiKey.Visibility = Visibility.Visible;
-                PanelEmbeddingApiKey.Visibility = Visibility.Collapsed;
-                PanelUrl.Visibility = Visibility.Visible;
-                ChatModelBox.IsEnabled = true;
-                EmbeddingModelBox.IsEnabled = true;
-                UrlBox.IsEnabled = true;
-                break;
-        }
-    }
-
-    private string? EffectiveMainApiKey(string tag, AppContextRoot ctx)
-    {
-        var s = _stateByTag[tag].MainApiKey;
-        if (!string.IsNullOrWhiteSpace(s))
-            return s;
-        return ctx.Settings.Get(AppSettingsKeys.ProfileApiKey(tag));
-    }
-
-    private string? EffectiveClaudeEmbeddingKey(AppContextRoot ctx)
-    {
-        var s = _stateByTag["claude"].ClaudeEmbeddingApiKey;
-        if (!string.IsNullOrWhiteSpace(s))
-            return s;
-        return ctx.Settings.Get(AppSettingsKeys.ProfileClaudeEmbeddingApiKey);
+        var s = _stateByTag[tag];
+        s.ChatModel = ChatModelBox.Text.Trim();
+        s.EmbeddingModel = EmbeddingModelBox.Text.Trim();
+        s.Url = UrlBox.Text.Trim();
+        s.MainApiKey = ApiKeyBox.Text.Trim();
+        s.ClaudeEmbeddingApiKey = EmbeddingApiKeyBox.Text.Trim();
     }
 
     private void Save_OnClick(object sender, RoutedEventArgs e)
     {
-        FlushFormToState(GetSelectedProviderTag());
-        var tag = GetSelectedProviderTag();
         var ctx = AppContextRoot.Instance;
+
+        var inferred = LlmEndpointInference.Infer(
+            UrlBox.Text.Trim(),
+            ApiKeyBox.Text.Trim(),
+            EmbeddingApiKeyBox.Text.Trim());
+        var tag = AppSettingsKeys.ProviderTag(inferred);
+
+        FlushFormToState(tag);
 
         var active = _stateByTag[tag];
         if (string.IsNullOrWhiteSpace(active.ChatModel) || string.IsNullOrWhiteSpace(active.EmbeddingModel))
@@ -158,33 +111,6 @@ public partial class SettingsWindow : Window
             MessageBox.Show(this, "LLM 모델과 임베딩 모델을 입력해 주세요.", "설정",
                 MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
-        }
-
-        if (tag is "openai" or "googleai" or "alibabacloud")
-        {
-            if (string.IsNullOrWhiteSpace(EffectiveMainApiKey(tag, ctx)))
-            {
-                MessageBox.Show(this, "API 키를 입력해 주세요.", "설정",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-        }
-
-        if (tag == "claude")
-        {
-            if (string.IsNullOrWhiteSpace(EffectiveMainApiKey(tag, ctx)))
-            {
-                MessageBox.Show(this, "API 키(Anthropic)를 입력해 주세요.", "설정",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(EffectiveClaudeEmbeddingKey(ctx)))
-            {
-                MessageBox.Show(this, "임베딩 API 키(OpenAI)를 입력해 주세요.", "설정",
-                    MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
         }
 
         try

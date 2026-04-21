@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\**\*.png" />
+    <Resource Include="Assets\app.ico" />
   </ItemGroup>
 
   <!-- sqlite-vec: QMan.App\native\ 에 DLL을 두면 어셈블리에만 임베드(publish 폴더에는 native 미생성). 실행 시 %LocalAppData%\QMan\vec\ 로 풀림. -->
@@ -36,6 +37,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <AssemblyName>QMan</AssemblyName>
     <RootNamespace>QMan.App</RootNamespace>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>

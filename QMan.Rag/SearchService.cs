@@ -26,8 +26,6 @@ public sealed class SearchService
 
     public IReadOnlyList<SearchHit> Search(float[] queryEmbedding, int topK, long? categoryId)
     {
-        var queryJson = EmbeddingUtil.ToJsonArray(queryEmbedding);
-
         if (_vec.IsEnabled && queryEmbedding.Length > 0)
         {
             try
@@ -35,7 +33,7 @@ public sealed class SearchService
                 // sqlite-vec: 쿼리 벡터 차원이 chunk_vec FLOAT[n]과 다르면 SQL logic error → 시작 시 추정값만으로
                 // 테이블을 만들고 첫 검색이 다른 차원이면 틀어질 수 있음. 검색 직전에 실제 쿼리 길이로 맞춤.
                 _db.EnsureVecTableDim(queryEmbedding.Length);
-                var hits = _vec.Knn(queryJson, topK, categoryId);
+                var hits = _vec.Knn(queryEmbedding, topK, categoryId);
                 if (hits.Count > 0)
                 {
                     var resolved = LookupChunksForVecHits(hits);

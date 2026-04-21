@@ -74,14 +74,10 @@ public sealed class AppConfig
         static string? FromKv(IReadOnlyDictionary<string, string> d, string key) =>
             d.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v : null;
 
-        var providerRaw = FirstNonEmpty(
-            Environment.GetEnvironmentVariable("SMQ_LLM_PROVIDER"),
+        var profileProviderTag = FirstNonEmpty(
             FromKv(kv, AppSettingsKeys.LlmProviderKey),
-            "openai");
-
-        var provider = ParseLlmProvider(providerRaw);
-
-        var ptag = AppSettingsKeys.ProviderTag(provider);
+            "openai") ?? "openai";
+        var ptag = profileProviderTag.ToLowerInvariant();
 
         var chatModel = FirstNonEmpty(
             Environment.GetEnvironmentVariable("SMQ_LLM_CHAT_MODEL"),
@@ -93,13 +89,6 @@ public sealed class AppConfig
             FromKv(kv, AppSettingsKeys.ProfileEmbeddingModel(ptag)),
             FromKv(kv, AppSettingsKeys.EmbeddingModel));
 
-        if (string.IsNullOrWhiteSpace(chatModel))
-            chatModel = DefaultChatModel(provider);
-
-        if (string.IsNullOrWhiteSpace(embeddingModel))
-            embeddingModel = DefaultEmbeddingModel(provider);
-
-        var apiKey = ResolveMainApiKey(provider, kv);
         var embedOnlyKey = FirstNonEmpty(
             Environment.GetEnvironmentVariable("SMQ_EMBEDDING_API_KEY"),
             Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
@@ -110,6 +99,20 @@ public sealed class AppConfig
             Environment.GetEnvironmentVariable("SMQ_LLM_URL"),
             FromKv(kv, AppSettingsKeys.ProfileUrl(ptag)),
             FromKv(kv, AppSettingsKeys.Url));
+
+        var storedP = ParseLlmProvider(profileProviderTag);
+        var apiKey = ResolveMainApiKey(storedP, kv);
+
+        var envOverrideProv = Environment.GetEnvironmentVariable("SMQ_LLM_PROVIDER");
+        var provider = !string.IsNullOrWhiteSpace(envOverrideProv)
+            ? ParseLlmProvider(envOverrideProv)
+            : LlmEndpointInference.Infer(url, apiKey, embedOnlyKey);
+
+        if (string.IsNullOrWhiteSpace(chatModel))
+            chatModel = DefaultChatModel(provider);
+
+        if (string.IsNullOrWhiteSpace(embeddingModel))
+            embeddingModel = DefaultEmbeddingModel(provider);
 
         var dimGuess = InferEmbeddingDimGuess(provider, embeddingModel);
 

@@ -105,12 +105,12 @@ public sealed class RagService
     {
         var json = EmbeddingUtil.ToJsonArray(embedding);
         _embeddingDao.Upsert(chunkId, _cfg.EmbeddingModel, embedding.Length, json);
-        if (_db.VecEnabled)
+        if (_db.VecEnabled && embedding.Length > 0)
         {
             try
             {
                 _db.EnsureVecTableDim(embedding.Length);
-                _vecDao.Upsert(chunkId, json);
+                _vecDao.Upsert(chunkId, embedding);
             }
             catch (Exception ex)
             {

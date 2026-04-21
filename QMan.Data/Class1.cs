@@ -280,8 +280,8 @@ public sealed class SqliteDb : IDisposable
 
     public void EnsureVecTableDim(int dim)
     {
-        if (!VecEnabled) return;
-        var target = Math.Max(1, dim);
+        if (!VecEnabled || dim <= 0) return;
+        var target = dim;
 
         using var cmd = Connection.CreateCommand();
 

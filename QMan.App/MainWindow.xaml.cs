@@ -61,7 +61,6 @@ public partial class MainWindow : Window
             return;
         }
 
-        RefreshStatusVec();
         RefreshChatCategories();
         RefreshManageCategories();
         RefreshDocumentsGrid();
@@ -70,31 +69,6 @@ public partial class MainWindow : Window
     private void MainWindow_OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         AppContextRoot.Shutdown();
-    }
-
-    private void RefreshStatusVec()
-    {
-        var ctx = AppContextRoot.Instance;
-        if (ctx.Db.VecEnabled)
-        {
-            StatusVec.Text = "벡터 검색: 사용 (sqlite-vec)";
-            StatusVec.ToolTip = null;
-            return;
-        }
-
-        var why = ctx.Db.VecDisabledReason;
-        if (string.IsNullOrWhiteSpace(why))
-        {
-            StatusVec.Text = "벡터 검색: 사용 안 함";
-            StatusVec.ToolTip = null;
-            return;
-        }
-
-        var one = why.ReplaceLineEndings(" ").Trim();
-        const int max = 72;
-        var shortWhy = one.Length <= max ? one : one[..(max - 1)] + "…";
-        StatusVec.Text = "벡터 검색: 사용 안 함 — " + shortWhy;
-        StatusVec.ToolTip = why;
     }
 
     private void StatusSettings_OnClick(object sender, RoutedEventArgs e)
@@ -778,7 +752,6 @@ public partial class MainWindow : Window
             }
 
             RefreshDocumentsGrid();
-            RefreshStatusVec();
             MessageBox.Show("인덱싱이 완료되었습니다.", "완료", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)

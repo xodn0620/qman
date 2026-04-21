@@ -182,28 +182,46 @@ public sealed class OllamaClient : ILlmClient
         }
 
         using var doc = JsonDocument.Parse(respBody);
-        var root = doc.RootElement;
-        JsonElement emb;
-
-        if (root.TryGetProperty("embeddings", out var arr) && arr.ValueKind == JsonValueKind.Array)
-        {
-            var first = arr[0];
-            emb = first.ValueKind == JsonValueKind.Array ? first : arr;
-        }
-        else if (root.TryGetProperty("embedding", out var single) && single.ValueKind == JsonValueKind.Array)
-        {
-            emb = single;
-        }
-        else
-        {
-            throw new InvalidOperationException("Ollama embedding 응답 파싱 실패: " + respBody);
-        }
+        var emb = ResolveOllamaEmbeddingArray(doc.RootElement, respBody);
 
         var v = new float[emb.GetArrayLength()];
         var i = 0;
         foreach (var e in emb.EnumerateArray())
             v[i++] = (float)e.GetDouble();
         return v;
+    }
+
+    /// <summary>
+    /// /api/embed: embeddings([[...]]) 또는 embedding([...]), 빈 배열·data[].embedding 등 처리.
+    /// </summary>
+    private static JsonElement ResolveOllamaEmbeddingArray(JsonElement root, string rawForError)
+    {
+        if (root.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array &&
+            data.GetArrayLength() > 0)
+        {
+            var row = data[0];
+            if (row.ValueKind == JsonValueKind.Object &&
+                row.TryGetProperty("embedding", out var embIn) && embIn.ValueKind == JsonValueKind.Array)
+                return embIn;
+        }
+
+        if (root.TryGetProperty("embeddings", out var embeddings) && embeddings.ValueKind == JsonValueKind.Array)
+        {
+            var len = embeddings.GetArrayLength();
+            if (len == 0)
+                throw new InvalidOperationException("Ollama: embeddings 배열이 비었습니다. " + rawForError);
+            var first = embeddings[0];
+            if (first.ValueKind == JsonValueKind.Array)
+                return first;
+            if (first.ValueKind == JsonValueKind.Number)
+                return embeddings;
+            throw new InvalidOperationException("Ollama: embeddings[0] 형식을 지원하지 않습니다. " + rawForError);
+        }
+
+        if (root.TryGetProperty("embedding", out var single) && single.ValueKind == JsonValueKind.Array)
+            return single;
+
+        throw new InvalidOperationException("Ollama embedding 응답 파싱 실패: " + rawForError);
     }
 
     private async Task<float[]> EmbedLegacyAsync(string text, CancellationToken ct)

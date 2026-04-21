@@ -17,9 +17,15 @@ public sealed class VecDao
 
     public bool IsEnabled => _db.VecEnabled;
 
-    public void Upsert(long chunkId, string embeddingJson)
+    /// <summary>
+    /// sqlite-vec: vec_f32(BLOB) 우선. 일부 빌드/모델 조합에서만 SQL logic error가 나면
+    /// Invariant JSON 텍스트 또는 vec_f32(JSON)로 재시도한다.
+    /// </summary>
+    public void Upsert(long chunkId, float[] embedding)
     {
-        if (!IsEnabled) return;
+        if (!IsEnabled || embedding.Length == 0) return;
+        var blob = VecEncoding.FloatsToLittleEndianBlob(embedding);
+        var json = VecEncoding.ToInvariantJsonArray(embedding);
         // vec0 + INSERT OR REPLACE 는 그림자 rowids 테이블에서 UNIQUE/준비 오류를 유발하는 사례가 있어
         // DELETE 후 INSERT 로 통일 (https://github.com/asg017/sqlite-vec/issues/259 등).
         using var tx = _conn.BeginTransaction();
@@ -33,14 +39,7 @@ public sealed class VecDao
                 del.ExecuteNonQuery();
             }
 
-            using (var ins = _conn.CreateCommand())
-            {
-                ins.Transaction = tx;
-                ins.CommandText = "INSERT INTO chunk_vec(rowid, embedding) VALUES ($id, $emb);";
-                ins.Parameters.AddWithValue("$id", chunkId);
-                ins.Parameters.AddWithValue("$emb", embeddingJson);
-                ins.ExecuteNonQuery();
-            }
+            InsertChunkVecOrThrow(tx, chunkId, blob, json);
 
             tx.Commit();
         }
@@ -51,13 +50,64 @@ public sealed class VecDao
         }
     }
 
-    public IReadOnlyList<VecHit> Knn(string queryEmbeddingJson, int topK, long? categoryId)
+    private static void InsertChunkVecOrThrow(SqliteTransaction tx, long chunkId, byte[] blob, string json)
     {
-        if (!IsEnabled) return Array.Empty<VecHit>();
+        Exception? last = null;
+        var attempts = new (string Sql, Action<SqliteCommand> Bind)[]
+        {
+            (
+                "INSERT INTO chunk_vec(rowid, embedding) VALUES ($rid, vec_f32($emb));",
+                c =>
+                {
+                    c.Parameters.AddWithValue("$rid", chunkId);
+                    c.Parameters.AddWithValue("$emb", blob);
+                }
+            ),
+            (
+                "INSERT INTO chunk_vec(rowid, embedding) VALUES ($rid, $json);",
+                c =>
+                {
+                    c.Parameters.AddWithValue("$rid", chunkId);
+                    c.Parameters.AddWithValue("$json", json);
+                }
+            ),
+            (
+                "INSERT INTO chunk_vec(rowid, embedding) VALUES ($rid, vec_f32($json));",
+                c =>
+                {
+                    c.Parameters.AddWithValue("$rid", chunkId);
+                    c.Parameters.AddWithValue("$json", json);
+                }
+            )
+        };
+
+        foreach (var (sql, bind) in attempts)
+        {
+            try
+            {
+                using var ins = tx.Connection!.CreateCommand();
+                ins.Transaction = tx;
+                ins.CommandText = sql;
+                bind(ins);
+                ins.ExecuteNonQuery();
+                return;
+            }
+            catch (SqliteException ex)
+            {
+                last = ex;
+            }
+        }
+
+        throw last ?? new InvalidOperationException("chunk_vec INSERT 실패");
+    }
+
+    public IReadOnlyList<VecHit> Knn(float[] queryEmbedding, int topK, long? categoryId)
+    {
+        if (!IsEnabled || queryEmbedding.Length == 0) return Array.Empty<VecHit>();
 
         try
         {
-            return KnnCore(queryEmbeddingJson, topK, categoryId);
+            return KnnCore(queryEmbedding, topK, categoryId);
         }
         catch (SqliteException)
         {
@@ -66,29 +116,44 @@ public sealed class VecDao
         }
     }
 
-    private IReadOnlyList<VecHit> KnnCore(string queryEmbeddingJson, int topK, long? categoryId)
+    private IReadOnlyList<VecHit> KnnCore(float[] queryEmbedding, int topK, long? categoryId)
     {
         // MATCH는 단순 FROM chunk_vec만 사용 (일부 sqlite-vec 빌드에서 JOIN+MATCH가 SQL logic error 유발)
         var fetchLimit = categoryId is null
             ? topK
             : Math.Max(topK * 40, Math.Min(500, topK * 100));
 
-        using var cmd = _conn.CreateCommand();
-        cmd.CommandText = """
-            SELECT v.rowid AS chunk_id, v.distance
-            FROM chunk_vec v
-            WHERE v.embedding MATCH $q
-            ORDER BY v.distance
-            LIMIT $k;
-            """;
-        cmd.Parameters.AddWithValue("$q", queryEmbeddingJson);
-        cmd.Parameters.AddWithValue("$k", fetchLimit);
+        var qBlob = VecEncoding.FloatsToLittleEndianBlob(queryEmbedding);
+        var qJson = VecEncoding.ToInvariantJsonArray(queryEmbedding);
 
-        var candidates = new List<VecHit>(fetchLimit);
-        using (var rd = cmd.ExecuteReader())
+        List<VecHit> candidates;
+        try
         {
-            while (rd.Read())
-                candidates.Add(new VecHit(rd.GetInt64(0), rd.GetDouble(1)));
+            candidates = ExecuteKnnQuery("""
+                SELECT v.rowid AS chunk_id, v.distance
+                FROM chunk_vec v
+                WHERE v.embedding MATCH vec_f32($q)
+                ORDER BY v.distance
+                LIMIT $k;
+                """, c =>
+            {
+                c.Parameters.AddWithValue("$q", qBlob);
+                c.Parameters.AddWithValue("$k", fetchLimit);
+            });
+        }
+        catch (SqliteException)
+        {
+            candidates = ExecuteKnnQuery("""
+                SELECT v.rowid AS chunk_id, v.distance
+                FROM chunk_vec v
+                WHERE v.embedding MATCH $qj
+                ORDER BY v.distance
+                LIMIT $k;
+                """, c =>
+            {
+                c.Parameters.AddWithValue("$qj", qJson);
+                c.Parameters.AddWithValue("$k", fetchLimit);
+            });
         }
 
         if (categoryId is null || candidates.Count == 0)
@@ -106,6 +171,21 @@ public sealed class VecDao
         }
 
         return filtered;
+    }
+
+    private List<VecHit> ExecuteKnnQuery(string sql, Action<SqliteCommand> bind)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = sql;
+        bind(cmd);
+        var list = new List<VecHit>();
+        using (var rd = cmd.ExecuteReader())
+        {
+            while (rd.Read())
+                list.Add(new VecHit(rd.GetInt64(0), rd.GetDouble(1)));
+        }
+
+        return list;
     }
 
     private HashSet<long> LoadChunkIdsInCategory(IEnumerable<long> chunkIds, long categoryId)

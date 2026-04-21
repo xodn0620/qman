@@ -9,6 +9,7 @@ public partial class App : Application
 {
     protected override void OnStartup(StartupEventArgs e)
     {
+        CrtNumericLocale.TrySetNumericC();
         NativeVecBootstrap.EnsureBundledNativeExtracted();
         base.OnStartup(e);
     }

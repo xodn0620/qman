@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="설정"
+        Icon="/Assets/app.ico"
         Height="520" Width="540"
         MinWidth="440"
         WindowStartupLocation="CenterOwner"
@@ -20,50 +21,45 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <TextBlock x:Name="FirstRunNotice" Grid.Row="0" TextWrapping="Wrap" FontSize="13" LineHeight="20"
                    Foreground="{StaticResource BrushAccentDeep}" Margin="0,0,0,14"
-                   Text="처음 실행입니다. LLM 설정을 입력한 뒤 「저장」을 눌러 주세요."
+                   Text="처음 실행입니다. LLM·임베딩 모델을 입력한 뒤 「저장」을 눌러 주세요. API URL·키는 비우면 각 백엔드 기본값을 사용합니다."
                    Visibility="Collapsed"/>
 
-        <TextBlock Grid.Row="1" Text="제공자" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
-        <ComboBox x:Name="ProviderCombo" Grid.Row="2" FontSize="14" Padding="8,6" Margin="0,0,0,14"
-                  SelectionChanged="ProviderCombo_OnSelectionChanged">
-            <ComboBoxItem Content="OpenAI" Tag="openai"/>
-            <ComboBoxItem Content="Ollama" Tag="ollama"/>
-            <ComboBoxItem Content="Claude" Tag="claude"/>
-            <ComboBoxItem Content="Google AI" Tag="googleai"/>
-            <ComboBoxItem Content="DS Playground" Tag="alibabacloud"/>
-        </ComboBox>
+        <TextBlock Grid.Row="1" Text="LLM 모델 (필수)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
+        <TextBox x:Name="ChatModelBox" Grid.Row="2" FontSize="14" Padding="8,6" Margin="0,0,0,12"
+                 TextChanged="FormInferenceFields_OnTextChanged"/>
 
-        <TextBlock x:Name="LlmModelCaption" Grid.Row="3" Text="LLM 모델" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
-        <TextBox x:Name="ChatModelBox" Grid.Row="4" FontSize="14" Padding="8,6" Margin="0,0,0,12"/>
+        <TextBlock Grid.Row="3" Text="임베딩 모델 (필수)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
+        <TextBox x:Name="EmbeddingModelBox" Grid.Row="4" FontSize="14" Padding="8,6" Margin="0,0,0,12"
+                 TextChanged="FormInferenceFields_OnTextChanged"/>
 
-        <TextBlock Grid.Row="5" Text="임베딩 모델" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
-        <TextBox x:Name="EmbeddingModelBox" Grid.Row="6" FontSize="14" Padding="8,6" Margin="0,0,0,12"/>
-
-        <StackPanel x:Name="PanelApiKey" Grid.Row="7" Margin="0,0,0,12">
-            <TextBlock Text="API 키" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
-            <TextBox x:Name="ApiKeyBox" FontSize="14" Padding="8,6" TextWrapping="NoWrap"/>
+        <StackPanel x:Name="PanelApiKey" Grid.Row="5" Margin="0,0,0,12">
+            <TextBlock Text="API 키 (선택 — 비우면 환경 변수 또는 로컬 백엔드)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
+            <TextBox x:Name="ApiKeyBox" FontSize="14" Padding="8,6" TextWrapping="NoWrap"
+                     TextChanged="FormInferenceFields_OnTextChanged"/>
         </StackPanel>
 
-        <StackPanel x:Name="PanelEmbeddingApiKey" Grid.Row="8" Margin="0,0,0,12" Visibility="Collapsed">
-            <TextBlock Text="임베딩 API 키 (OpenAI)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
-            <TextBlock Text="Claude는 채팅만 Anthropic입니다. 임베딩은 OpenAI 키가 필요합니다."
+        <StackPanel x:Name="PanelEmbeddingApiKey" Grid.Row="6" Margin="0,0,0,12" Visibility="Collapsed">
+            <TextBlock Text="임베딩 API 키 (OpenAI, Claude 사용 시)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
+            <TextBlock Text="Anthropic으로 채팅할 때 임베딩은 OpenAI 호환 키가 필요합니다."
                        FontSize="11" Foreground="{StaticResource BrushMuted}" TextWrapping="Wrap" Margin="0,0,0,6"/>
-            <TextBox x:Name="EmbeddingApiKeyBox" FontSize="14" Padding="8,6"/>
+            <TextBox x:Name="EmbeddingApiKeyBox" FontSize="14" Padding="8,6"
+                     TextChanged="FormInferenceFields_OnTextChanged"/>
         </StackPanel>
 
-        <StackPanel x:Name="PanelUrl" Grid.Row="9" VerticalAlignment="Top" Margin="0,8,0,0">
-            <TextBlock Text="API URL (비우면 기본값)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
-            <TextBox x:Name="UrlBox" FontSize="14" Padding="8,6" Margin="0,0,0,8"/>
+        <StackPanel x:Name="PanelUrl" Grid.Row="7" VerticalAlignment="Top" Margin="0,0,0,8">
+            <TextBlock Text="API URL (선택 — 비우면 기본값)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
+            <TextBox x:Name="UrlBox" FontSize="14" Padding="8,6" Margin="0,0,0,4"
+                     TextChanged="FormInferenceFields_OnTextChanged"/>
+            <TextBlock x:Name="InferenceHint" FontSize="11" Foreground="{StaticResource BrushMuted}" TextWrapping="Wrap"/>
         </StackPanel>
 
-        <StackPanel Grid.Row="10" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+        <StackPanel Grid.Row="9" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
             <Button x:Name="CancelButton" Content="취소" MinWidth="96" Height="38" Margin="0,0,10,0" Click="Cancel_OnClick"/>
             <Button Content="저장" MinWidth="96" Height="38" Style="{StaticResource AccentButton}" Click="Save_OnClick"/>
         </StackPanel>
