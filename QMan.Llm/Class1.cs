@@ -31,7 +31,7 @@ public sealed class OpenAiClient : ILlmClient
 
     public async Task<float[]> EmbedAsync(string text, CancellationToken ct = default)
     {
-        RequireKey();
+        RequireEmbeddingKey();
 
         var body = new
         {
@@ -43,8 +43,9 @@ public sealed class OpenAiClient : ILlmClient
         {
             Content = JsonContent.Create(body)
         };
+        var embKey = ResolveEmbeddingAuthKey()!;
         req.Headers.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _config.OpenAiApiKey);
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", embKey);
 
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
@@ -105,7 +106,26 @@ public sealed class OpenAiClient : ILlmClient
     {
         if (string.IsNullOrWhiteSpace(_config.OpenAiApiKey))
             throw new InvalidOperationException(
-                "API 키가 설정되지 않았습니다. 설정에서 API 키를 입력하거나 환경변수 OPENAI_API_KEY를 설정해 주세요.");
+                "LLM API 키가 설정되지 않았습니다. 설정에서 LLM API 키를 입력하거나 환경변수 OPENAI_API_KEY/ SMQ_LLM_API_KEY를 설정해 주세요.");
+    }
+
+    private void RequireEmbeddingKey()
+    {
+        if (string.IsNullOrWhiteSpace(ResolveEmbeddingAuthKey()))
+            throw new InvalidOperationException(
+                _config.LlmProvider == LlmProvider.DsPlayground
+                    ? "임베딩 API 키가 설정되지 않았습니다. 설정에 임베딩 API 키를 넣거나 SMQ_EMBEDDING_API_KEY 를 설정해 주세요."
+                    : "API 키가 설정되지 않았습니다. 설정에서 API 키를 입력하거나 환경변수 OPENAI_API_KEY를 설정해 주세요.");
+    }
+
+    /// <summary>임베딩 엔드포인트용 Bearer( DS Playground 는 임베딩 전용 키, 그 외 OpenAI는 메인 키).</summary>
+    private string? ResolveEmbeddingAuthKey()
+    {
+        if (!string.IsNullOrWhiteSpace(_config.EmbeddingApiKey))
+            return _config.EmbeddingApiKey;
+        if (_config.LlmProvider == LlmProvider.DsPlayground)
+            return null;
+        return _config.OpenAiApiKey;
     }
 
     private string ResolveChatUrl()

@@ -5,8 +5,8 @@ using QMan.Core;
 namespace QMan.App;
 
 /// <summary>
-/// 빌드 시 QMan.App\native\ 에 넣은 sqlite-vec DLL을 임베드한 뒤, 첫 실행 시 %LocalAppData%\QMan\vec\ 로 풉니다.
-/// (SQLite LoadExtension은 파일 경로가 필요하므로 디스크 캐시는 필수이며, QMan.exe 옆 폴더는 비웁니다.)
+/// 빌드 시 QMan.App\native\ 에 넣은 sqlite-vec DLL을 임베드한 뒤, 첫 실행(또는 누락 시) <see cref="AppPaths.NativeDir"/> 로 풉니다.
+/// (SQLite LoadExtension은 파일 경로가 필요합니다. <c>data\</c>와 같이 exe 옆에 <c>native\</c> 를 둡니다.)
 /// </summary>
 internal static class NativeVecBootstrap
 {
@@ -32,8 +32,8 @@ internal static class NativeVecBootstrap
         if (stream is null)
             return;
 
-        Directory.CreateDirectory(AppPaths.SqliteVecCacheDir);
-        var dest = Path.Combine(AppPaths.SqliteVecCacheDir, fileName);
+        Directory.CreateDirectory(AppPaths.NativeDir);
+        var dest = Path.Combine(AppPaths.NativeDir, fileName);
         if (File.Exists(dest))
         {
             try

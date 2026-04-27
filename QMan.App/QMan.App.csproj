@@ -13,7 +13,7 @@
     <Resource Include="Assets\app.ico" />
   </ItemGroup>
 
-  <!-- sqlite-vec: QMan.App\native\ 에 DLL을 두면 어셈블리에만 임베드(publish 폴더에는 native 미생성). 실행 시 %LocalAppData%\QMan\vec\ 로 풀림. -->
+  <!-- sqlite-vec: QMan.App\native\ 에 DLL을 두면 어셈블리에 임베드. 배포 시 publish 폴더에 native 미포함. 실행 시 QMan.exe 옆 native\ 로 풀림. -->
   <ItemGroup>
     <_BundledNativeDll Include="native\sqlite-vec.dll" Condition="Exists('native\sqlite-vec.dll')" />
     <_BundledNativeDll Include="native\sqlite_vec.dll" Condition="Exists('native\sqlite_vec.dll')" />

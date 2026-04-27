@@ -59,8 +59,8 @@ public sealed class AppSettingsDao
                 if (!string.IsNullOrWhiteSpace(s.MainApiKey))
                     Upsert(tx, AppSettingsKeys.ProfileApiKey(tag), s.MainApiKey.Trim());
 
-                if (tag == "claude" && !string.IsNullOrWhiteSpace(s.ClaudeEmbeddingApiKey))
-                    Upsert(tx, AppSettingsKeys.ProfileClaudeEmbeddingApiKey, s.ClaudeEmbeddingApiKey.Trim());
+                if (tag is "claude" or "dsplayground" && !string.IsNullOrWhiteSpace(s.ClaudeEmbeddingApiKey))
+                    Upsert(tx, AppSettingsKeys.ProfileEmbeddingApiKey(tag), s.ClaudeEmbeddingApiKey.Trim());
             }
 
             Upsert(tx, AppSettingsKeys.LlmProviderKey, activeProviderTag);
@@ -110,8 +110,11 @@ public sealed class AppSettingsDao
                 EmbeddingModel = K(kv, AppSettingsKeys.ProfileEmbeddingModel(tag)) ?? "",
                 Url = K(kv, AppSettingsKeys.ProfileUrl(tag)) ?? "",
                 MainApiKey = K(kv, AppSettingsKeys.ProfileApiKey(tag)) ?? "",
-                ClaudeEmbeddingApiKey =
-                    tag == "claude" ? (K(kv, AppSettingsKeys.ProfileClaudeEmbeddingApiKey) ?? "") : ""
+                ClaudeEmbeddingApiKey = tag is "claude" or "dsplayground"
+                    ? (K(kv, AppSettingsKeys.ProfileEmbeddingApiKey(tag))
+                       ?? (tag == "claude" ? K(kv, AppSettingsKeys.ProfileClaudeEmbeddingApiKey) : null)
+                       ?? "")
+                    : ""
             };
         }
 
@@ -141,6 +144,9 @@ public sealed class AppSettingsDao
             if (string.IsNullOrWhiteSpace(st.EmbeddingModel))
                 st.EmbeddingModel = AppConfig.DefaultEmbeddingModel(p);
         }
+
+        if (string.IsNullOrWhiteSpace(r["dsplayground"].Url))
+            r["dsplayground"].Url = "https://apigw-dev.aisp-shinhands.co.kr/v1";
 
         return r;
     }

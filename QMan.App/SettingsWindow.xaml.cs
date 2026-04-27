@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using QMan.Core;
@@ -10,9 +9,11 @@ namespace QMan.App;
 public partial class SettingsWindow : Window
 {
     private bool _uiReady;
-    private bool _allowClose;
+    private bool _suppressModeEvent;
     private Dictionary<string, LlmProviderFormState> _stateByTag = new(StringComparer.OrdinalIgnoreCase);
-    private string _loadedProfileTag = "openai";
+    private string _loadedProfileTag = "dsplayground";
+    /// <summary>타사 AI 모드에서 편집 중인 프로필 태그(콤보로 DS에 갔다 올 때 복원).</summary>
+    private string _thirdPartyFormTag = "openai";
 
     public bool FirstRun { get; init; }
 
@@ -22,22 +23,61 @@ public partial class SettingsWindow : Window
         Loaded += SettingsWindow_OnLoaded;
     }
 
+    private static bool IsDsItemSelected(ComboBox c) => c.SelectedIndex == 1;
+
     private void SettingsWindow_OnLoaded(object sender, RoutedEventArgs e)
     {
-        FirstRunNotice.Visibility = FirstRun ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.Visibility = FirstRun ? Visibility.Collapsed : Visibility.Visible;
 
         var ctx = AppContextRoot.Instance;
         var kv = ctx.Settings.LoadAll();
         _stateByTag = AppSettingsDao.LoadProviderFormStates(kv);
 
-        var storedProv = AppConfig.ParseLlmProvider(
-            kv.TryGetValue(AppSettingsKeys.LlmProviderKey, out var pt) ? pt : "openai");
-        _loadedProfileTag = AppSettingsKeys.ProviderTag(storedProv);
+        var raw = kv.TryGetValue(AppSettingsKeys.LlmProviderKey, out var pt) ? pt : "dsplayground";
+        _loadedProfileTag = AppSettingsKeys.ProviderTag(AppConfig.ParseLlmProvider(raw));
+        if (_loadedProfileTag == "dsplayground")
+            _thirdPartyFormTag = "openai";
+        else
+            _thirdPartyFormTag = _loadedProfileTag;
 
+        _suppressModeEvent = true;
         _uiReady = false;
-        LoadStateToForm(_loadedProfileTag);
+        ModeCombo.SelectedIndex = _loadedProfileTag == "dsplayground" ? 1 : 0;
+        var loadTag = IsDsItemSelected(ModeCombo) ? "dsplayground" : _thirdPartyFormTag;
+        LoadStateToForm(loadTag);
+        _suppressModeEvent = false;
         _uiReady = true;
+        RefreshInferredPanels();
+    }
+
+    private void ModeCombo_OnSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_uiReady || _suppressModeEvent)
+            return;
+
+        var isDs = IsDsItemSelected(ModeCombo);
+        if (e.RemovedItems.Count > 0)
+        {
+            if (isDs)
+            {
+                // 타사 -> DS: 이전(타사) 화면 내용을 프로필에 반영
+                var inferred = LlmEndpointInference.Infer(
+                    UrlBox.Text.Trim(),
+                    ApiKeyBox.Text.Trim(),
+                    EmbeddingApiKeyBox.Text.Trim());
+                var tag = AppSettingsKeys.ProviderTag(inferred);
+                FlushFormToState(tag);
+                _thirdPartyFormTag = tag;
+            }
+            else
+            {
+                // DS -> 타사: DS 화면 내용을 반영
+                FlushFormToState("dsplayground");
+            }
+        }
+
+        var loadTag = isDs ? "dsplayground" : _thirdPartyFormTag;
+        LoadStateToForm(loadTag);
         RefreshInferredPanels();
     }
 
@@ -50,12 +90,50 @@ public partial class SettingsWindow : Window
 
     private void RefreshInferredPanels()
     {
+        if (IsDsItemSelected(ModeCombo))
+        {
+            FirstRunNotice.Visibility = Visibility.Collapsed;
+            LlmModelLabel.Text = "LLM 모델";
+            EmbModelLabel.Text = "임베딩 모델";
+            PanelEmbeddingApiKey.Visibility = Visibility.Visible;
+            EmbeddingKeyTitle.Text = "임베딩 API 키";
+            EmbeddingKeyHint.Visibility = Visibility.Collapsed;
+            ClaudeEmbeddingKeyHint.Visibility = Visibility.Collapsed;
+            ApiKeyLabel.Text = "LLM API 키";
+            UrlLabel.Text = "API URL";
+            InferenceHint.Visibility = Visibility.Collapsed;
+            InferenceHint.Text = string.Empty;
+            return;
+        }
+
+        FirstRunNotice.Visibility = FirstRun ? Visibility.Visible : Visibility.Collapsed;
+        LlmModelLabel.Text = "LLM 모델 (필수)";
+        EmbModelLabel.Text = "임베딩 모델 (필수)";
+        InferenceHint.Visibility = Visibility.Visible;
         var p = LlmEndpointInference.Infer(
             UrlBox.Text.Trim(),
             ApiKeyBox.Text.Trim(),
             EmbeddingApiKeyBox.Text.Trim());
 
-        PanelEmbeddingApiKey.Visibility = p == LlmProvider.Claude ? Visibility.Visible : Visibility.Collapsed;
+        var showEmb = p == LlmProvider.Claude;
+        PanelEmbeddingApiKey.Visibility = showEmb ? Visibility.Visible : Visibility.Collapsed;
+        if (showEmb)
+        {
+            EmbeddingKeyTitle.Text = "임베딩 API 키 (Claude: OpenAI 호환 키)";
+            EmbeddingKeyHint.Visibility = Visibility.Collapsed;
+            ClaudeEmbeddingKeyHint.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            EmbeddingKeyHint.Visibility = Visibility.Collapsed;
+            ClaudeEmbeddingKeyHint.Visibility = Visibility.Collapsed;
+        }
+
+        UrlLabel.Text = "API URL (선택 — 비우면 기본값)";
+
+        ApiKeyLabel.Text = p == LlmProvider.Claude
+            ? "채팅 API 키 (Claude) / 비우면 환경 변수"
+            : "LLM API 키 (선택 — 비우면 환경 변수 또는 로컬 백엔드)";
 
         InferenceHint.Text = p switch
         {
@@ -96,26 +174,57 @@ public partial class SettingsWindow : Window
     private void Save_OnClick(object sender, RoutedEventArgs e)
     {
         var ctx = AppContextRoot.Instance;
+        var isDs = IsDsItemSelected(ModeCombo);
 
-        var inferred = LlmEndpointInference.Infer(
-            UrlBox.Text.Trim(),
-            ApiKeyBox.Text.Trim(),
-            EmbeddingApiKeyBox.Text.Trim());
-        var tag = AppSettingsKeys.ProviderTag(inferred);
-
-        FlushFormToState(tag);
-
-        var active = _stateByTag[tag];
-        if (string.IsNullOrWhiteSpace(active.ChatModel) || string.IsNullOrWhiteSpace(active.EmbeddingModel))
+        string activeTag;
+        if (isDs)
         {
-            MessageBox.Show(this, "LLM 모델과 임베딩 모델을 입력해 주세요.", "설정",
-                MessageBoxButton.OK, MessageBoxImage.Warning);
+            FlushFormToState("dsplayground");
+            activeTag = "dsplayground";
+        }
+        else
+        {
+            var inferred = LlmEndpointInference.Infer(
+                UrlBox.Text.Trim(),
+                ApiKeyBox.Text.Trim(),
+                EmbeddingApiKeyBox.Text.Trim());
+            activeTag = AppSettingsKeys.ProviderTag(inferred);
+            FlushFormToState(activeTag);
+            _thirdPartyFormTag = activeTag;
+        }
+
+        if (!_stateByTag.TryGetValue(activeTag, out var active))
+        {
+            MessageBox.Show(this, "저장할 설정 상태를 찾을 수 없습니다.", "설정", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
+        }
+
+        if (isDs)
+        {
+            if (string.IsNullOrWhiteSpace(active.ChatModel) ||
+                string.IsNullOrWhiteSpace(active.EmbeddingModel) ||
+                string.IsNullOrWhiteSpace(active.MainApiKey) ||
+                string.IsNullOrWhiteSpace(active.ClaudeEmbeddingApiKey) ||
+                string.IsNullOrWhiteSpace(active.Url))
+            {
+                MessageBox.Show(this, "필수 입력 항목을 입력하세요.", "설정",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+        }
+        else
+        {
+            if (string.IsNullOrWhiteSpace(active.ChatModel) || string.IsNullOrWhiteSpace(active.EmbeddingModel))
+            {
+                MessageBox.Show(this, "LLM 모델과 임베딩 모델을 입력해 주세요.", "설정",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
         }
 
         try
         {
-            ctx.Settings.SaveAllProviderProfiles(_stateByTag, tag, markSetupComplete: true);
+            ctx.Settings.SaveAllProviderProfiles(_stateByTag, activeTag, markSetupComplete: true);
         }
         catch (Exception ex)
         {
@@ -123,24 +232,9 @@ public partial class SettingsWindow : Window
             return;
         }
 
-        _allowClose = true;
         DialogResult = true;
     }
 
-    private void Cancel_OnClick(object sender, RoutedEventArgs e)
-    {
-        _allowClose = true;
-        DialogResult = false;
-    }
+    private void Cancel_OnClick(object sender, RoutedEventArgs e) => DialogResult = false;
 
-    private void SettingsWindow_OnClosing(object? sender, CancelEventArgs e)
-    {
-        if (_allowClose)
-            return;
-        if (!FirstRun)
-            return;
-        e.Cancel = true;
-        MessageBox.Show(this, "「저장」으로 설정을 완료해 주세요.", "설정",
-            MessageBoxButton.OK, MessageBoxImage.Information);
-    }
 }

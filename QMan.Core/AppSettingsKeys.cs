@@ -19,10 +19,15 @@ public static class AppSettingsKeys
     public static string ProfileEmbeddingModel(string providerTag) => $"{ProfilePrefix}{providerTag}.embedding_model";
     public static string ProfileApiKey(string providerTag) => $"{ProfilePrefix}{providerTag}.api_key";
     public static string ProfileUrl(string providerTag) => $"{ProfilePrefix}{providerTag}.url";
+    public static string ProfileEmbeddingApiKey(string providerTag) =>
+        $"{ProfilePrefix}{providerTag}.embedding_api_key";
     /// <summary>Claude 전용.</summary>
     public const string ProfileClaudeEmbeddingApiKey = "cfg.llm.profile.claude.embedding_api_key";
 
-    public static readonly string[] AllProviderTags = ["openai", "ollama", "claude", "googleai", "alibabacloud"];
+    public static readonly string[] AllProviderTags =
+    [
+        "openai", "ollama", "claude", "googleai", "alibabacloud", "dsplayground"
+    ];
 
     public static string ProviderTag(LlmProvider p) => p switch
     {
@@ -30,6 +35,7 @@ public static class AppSettingsKeys
         LlmProvider.Claude => "claude",
         LlmProvider.GoogleAi => "googleai",
         LlmProvider.AlibabaCloud => "alibabacloud",
+        LlmProvider.DsPlayground => "dsplayground",
         _ => "openai"
     };
 }

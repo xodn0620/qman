@@ -6,7 +6,9 @@ public enum LlmProvider
     Ollama,
     Claude,
     GoogleAi,
-    AlibabaCloud
+    AlibabaCloud,
+    /// <summary>신한DS Playground(채팅·임베딩 API 키 분리, OpenAI 호환 URL).</summary>
+    DsPlayground
 }
 
 /// <summary>
@@ -34,20 +36,19 @@ public static class AppPaths
     public static string DataDir => Path.Combine(AppHomeDir, "data");
     public static string DbPath => Path.Combine(DataDir, "qman.db");
 
+    /// <summary>빌드에 포함된 sqlite-vec DLL이 임베드·추출되는 경로 (QMan.exe와 같은 폴더 아래 <c>native</c>).</summary>
+    public static string NativeDir => Path.Combine(AppHomeDir, "native");
+
     /// <summary>
-    /// 임베드된 sqlite-vec 네이티브 DLL을 풀어두는 경로(QMan.exe 옆이 아님).
-    /// SQLite LoadExtension은 Windows에서 파일 경로가 필요해 메모리만으로는 로드할 수 없습니다.
+    /// sqlite-vec DLL 경로( <see cref="NativeDir"/> 와 동일). LoadExtension에 파일 경로가 필요해 디스크에 둡니다.
     /// </summary>
-    public static string SqliteVecCacheDir =>
-        Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "QMan",
-            "vec");
+    public static string SqliteVecCacheDir => NativeDir;
 
     public static void EnsureDirs()
     {
         Directory.CreateDirectory(AppHomeDir);
         Directory.CreateDirectory(DataDir);
+        Directory.CreateDirectory(NativeDir);
     }
 }
 
@@ -61,7 +62,7 @@ public sealed class AppConfig
     public string EmbeddingModel { get; init; } = string.Empty;
     /// <summary>제공자별 메인 API 키(OpenAI / Anthropic / DashScope).</summary>
     public string? OpenAiApiKey { get; init; }
-    /// <summary>Claude 전용: OpenAI 임베딩 API 키.</summary>
+    /// <summary>Claude: OpenAI 임베딩 API 키. DS Playground: 임베딩 전용 API 키.</summary>
     public string? EmbeddingApiKey { get; init; }
     public string? Url { get; init; }
     public int EmbeddingDimGuess { get; init; }
@@ -76,7 +77,7 @@ public sealed class AppConfig
 
         var profileProviderTag = FirstNonEmpty(
             FromKv(kv, AppSettingsKeys.LlmProviderKey),
-            "openai") ?? "openai";
+            "dsplayground") ?? "dsplayground";
         var ptag = profileProviderTag.ToLowerInvariant();
 
         var chatModel = FirstNonEmpty(
@@ -91,8 +92,8 @@ public sealed class AppConfig
 
         var embedOnlyKey = FirstNonEmpty(
             Environment.GetEnvironmentVariable("SMQ_EMBEDDING_API_KEY"),
+            FromKv(kv, AppSettingsKeys.ProfileEmbeddingApiKey(ptag)),
             Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
-            FromKv(kv, AppSettingsKeys.ProfileClaudeEmbeddingApiKey),
             FromKv(kv, AppSettingsKeys.EmbeddingApiKey));
 
         var url = FirstNonEmpty(
@@ -106,7 +107,9 @@ public sealed class AppConfig
         var envOverrideProv = Environment.GetEnvironmentVariable("SMQ_LLM_PROVIDER");
         var provider = !string.IsNullOrWhiteSpace(envOverrideProv)
             ? ParseLlmProvider(envOverrideProv)
-            : LlmEndpointInference.Infer(url, apiKey, embedOnlyKey);
+            : (storedP == LlmProvider.DsPlayground
+                ? LlmProvider.DsPlayground
+                : LlmEndpointInference.Infer(url, apiKey, embedOnlyKey));
 
         if (string.IsNullOrWhiteSpace(chatModel))
             chatModel = DefaultChatModel(provider);
@@ -122,7 +125,7 @@ public sealed class AppConfig
             ChatModel = chatModel,
             EmbeddingModel = embeddingModel,
             OpenAiApiKey = apiKey,
-            EmbeddingApiKey = provider == LlmProvider.Claude ? embedOnlyKey : null,
+            EmbeddingApiKey = provider is LlmProvider.Claude or LlmProvider.DsPlayground ? embedOnlyKey : null,
             Url = url,
             EmbeddingDimGuess = dimGuess
         };
@@ -135,6 +138,7 @@ public sealed class AppConfig
             LlmProvider.Claude => "claude-sonnet-4-20250514",
             LlmProvider.GoogleAi => "gemini-2.5-flash-lite",
             LlmProvider.AlibabaCloud => "qwen3-max",
+            LlmProvider.DsPlayground => "Qwen3.5-122B",
             _ => "gpt-4o-mini"
         };
 
@@ -145,6 +149,7 @@ public sealed class AppConfig
             LlmProvider.Claude => "text-embedding-3-small",
             LlmProvider.GoogleAi => "gemini-embedding-001",
             LlmProvider.AlibabaCloud => "text-embedding-v3",
+            LlmProvider.DsPlayground => "bge-m3",
             _ => "text-embedding-3-small"
         };
 
@@ -178,12 +183,16 @@ public sealed class AppConfig
                 Environment.GetEnvironmentVariable("DASHSCOPE_API_KEY"),
                 Environment.GetEnvironmentVariable("SMQ_LLM_API_KEY"),
                 fromFile),
+            LlmProvider.DsPlayground => FirstNonEmpty(
+                Environment.GetEnvironmentVariable("SMQ_LLM_API_KEY"),
+                Environment.GetEnvironmentVariable("OPENAI_API_KEY"),
+                fromFile),
             _ => fromFile
         };
     }
 
     /// <summary>
-    /// sqlite-vec DLL 경로를 찾습니다. 임베드 풀림 캐시(%LocalAppData%\QMan\vec\)만 봅니다.
+    /// sqlite-vec DLL 경로를 찾습니다. <see cref="AppPaths.NativeDir"/> (exe 옆 <c>native\</c>)만 봅니다.
     /// </summary>
     public static string? TryFindNativeVecDllPath()
     {
@@ -196,7 +205,7 @@ public sealed class AppConfig
             "sqlitevec.dll"
         };
 
-        var root = AppPaths.SqliteVecCacheDir;
+        var root = AppPaths.NativeDir;
         foreach (var name in fileNames)
         {
             try
@@ -228,7 +237,8 @@ public sealed class AppConfig
             "ollama" => LlmProvider.Ollama,
             "claude" or "anthropic" => LlmProvider.Claude,
             "googleai" or "google" or "google_ai" or "gemini" => LlmProvider.GoogleAi,
-            "alibabacloud" or "alibaba" or "alibaba_cloud" or "qwen3" or "qwen" or "dashscope" or "dsplayground" =>
+            "dsplayground" or "ds_playground" => LlmProvider.DsPlayground,
+            "alibabacloud" or "alibaba" or "alibaba_cloud" or "qwen3" or "qwen" or "dashscope" =>
                 LlmProvider.AlibabaCloud,
             "openai" or "oa" => LlmProvider.OpenAi,
             _ => LlmProvider.OpenAi
@@ -238,6 +248,7 @@ public sealed class AppConfig
     private static int InferEmbeddingDimGuess(LlmProvider provider, string embeddingModel)
     {
         var m = (embeddingModel ?? string.Empty).Trim();
+        if (m.Contains("bge-m3", StringComparison.OrdinalIgnoreCase)) return 1024;
 
         if (provider is LlmProvider.OpenAi or LlmProvider.Claude)
         {

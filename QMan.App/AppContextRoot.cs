@@ -45,6 +45,7 @@ public sealed class AppContextRoot : IDisposable
             LlmProvider.Claude => new ClaudeClient(Config),
             LlmProvider.GoogleAi => new GoogleAiClient(Config),
             LlmProvider.AlibabaCloud => new AlibabaCloudClient(Config),
+            LlmProvider.DsPlayground => new OpenAiClient(Config),
             _ => new OpenAiClient(Config)
         };
 
