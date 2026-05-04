@@ -28,13 +28,19 @@
     <None Update="README.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\LICENSE" Link="LICENSE">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\THIRD_PARTY_NOTICES.txt" Link="THIRD_PARTY_NOTICES.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
   <!-- 실행 파일 이름: 배포 폴더에서 찾기 쉽도록 QMan.exe (네임스페이스는 QMan.App 유지) -->
   <!-- 오프라인 ZIP: dotnet publish -p:PublishProfile=Portable-win-x64 → dist\QMan-portable-win-x64\ -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net8.0-windows10.0.17763.0</TargetFramework>
     <AssemblyName>QMan</AssemblyName>
     <RootNamespace>QMan.App</RootNamespace>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>

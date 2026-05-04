@@ -35,6 +35,7 @@ public sealed class SqliteDb : IDisposable
 
         MigrateSchema();
         AppSettingsDao.TryImportLegacyConfigJson(Connection);
+        AppSettingsDao.ProtectStoredSecrets(Connection);
         var kv = new AppSettingsDao(Connection).LoadAll();
         Config = AppConfig.FromStoredValues(kv);
         VecDisabledReason = "";
@@ -65,6 +66,29 @@ public sealed class SqliteDb : IDisposable
         if (string.IsNullOrWhiteSpace(dllPath) || !File.Exists(dllPath))
         {
             error = $"DLL 경로 없음: {dllPath}";
+            return false;
+        }
+
+        // If a sidecar hash file exists next to the DLL, verify SHA256 matches.
+        try
+        {
+            var sidecar = dllPath + ".sha256";
+            if (File.Exists(sidecar))
+            {
+                var expectedHex = File.ReadAllText(sidecar).Trim();
+                var actual = System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(dllPath));
+                var actualHex = BitConverter.ToString(actual).Replace("-", "").ToLowerInvariant();
+                if (!string.Equals(expectedHex, actualHex, StringComparison.OrdinalIgnoreCase))
+                {
+                    error = $"네이티브 DLL 무결성 검사 실패 (해시 불일치): {dllPath}";
+                    return false;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // 무결성 검사 자체가 실패하면 로드 중단
+            error = "네이티브 DLL 해시 검사 도중 오류: " + ex.Message;
             return false;
         }
 

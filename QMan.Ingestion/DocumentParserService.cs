@@ -1,40 +1,56 @@
+using System.IO;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Presentation;
 using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Wordprocessing;
 using DText = DocumentFormat.OpenXml.Drawing.Text;
-using NPOI.HSSF.UserModel;
-using NPOI.SS.UserModel;
+using ExcelDataReader;
 using QMan.Core;
-using Tesseract;
 using UglyToad.PdfPig;
+using Windows.Globalization;
+using Windows.Graphics.Imaging;
+using Windows.Media.Ocr;
 
 namespace QMan.Ingestion;
 
 public sealed class DocumentParserService
 {
+    private const long MaxAcceptedFileBytes = 128L * 1024 * 1024;
+    private static readonly HashSet<string> SupportedExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".pdf", ".pptx", ".ppt", ".docx", ".doc", ".xlsx", ".xls", ".txt",
+        ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tiff"
+    };
+
+    static DocumentParserService()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+    }
+
     public IReadOnlyList<ParsedUnit> Parse(string filePath)
     {
-        var name = System.IO.Path.GetFileName(filePath).ToLowerInvariant();
+        var normalizedPath = NormalizeAndValidatePath(filePath);
+        var name = System.IO.Path.GetFileName(normalizedPath).ToLowerInvariant();
         try
         {
-            if (name.EndsWith(".pdf", StringComparison.Ordinal)) return ParsePdf(filePath);
-            if (name.EndsWith(".pptx", StringComparison.Ordinal)) return ParsePptxOpenXml(filePath);
+            if (name.EndsWith(".pdf", StringComparison.Ordinal)) return ParsePdf(normalizedPath);
+            if (name.EndsWith(".pptx", StringComparison.Ordinal)) return ParsePptxOpenXml(normalizedPath);
             if (name.EndsWith(".ppt", StringComparison.Ordinal))
-                return new List<ParsedUnit> { new(null, "(.ppt 구 형식은 DocumentFormat.OpenXml 미지원 — NPOI 확장 또는 변환 필요)") };
-            if (name.EndsWith(".xlsx", StringComparison.Ordinal)) return ParseXlsxOpenXml(filePath);
-            if (name.EndsWith(".xls", StringComparison.Ordinal)) return ParseXls(filePath);
-            if (name.EndsWith(".docx", StringComparison.Ordinal)) return ParseDocxOpenXml(filePath);
+                return new List<ParsedUnit> { new(null, "(.ppt 구 형식은 DocumentFormat.OpenXml 미지원 — 변환 필요)") };
+            if (name.EndsWith(".xlsx", StringComparison.Ordinal) || name.EndsWith(".xls", StringComparison.Ordinal))
+                return ParseExcel(normalizedPath);
+            if (name.EndsWith(".docx", StringComparison.Ordinal)) return ParseDocxOpenXml(normalizedPath);
             if (name.EndsWith(".doc", StringComparison.Ordinal))
                 return new List<ParsedUnit> { new(null, "(.doc 구 형식은 이 빌드에서 미지원 — .docx 변환 권장)") };
-            if (name.EndsWith(".txt", StringComparison.Ordinal)) return ParseTxt(filePath);
-            if (IsImage(name)) return ParseImage(filePath);
-            return ParseTxt(filePath);
+            if (name.EndsWith(".txt", StringComparison.Ordinal)) return ParseTxt(normalizedPath);
+            if (IsImage(name)) return ParseImage(normalizedPath);
+            return ParseTxt(normalizedPath);
         }
         catch (Exception e)
         {
-            throw new InvalidOperationException("문서 파싱 실패: " + filePath, e);
+            throw new InvalidOperationException("문서 파싱 실패: " + System.IO.Path.GetFileName(normalizedPath), e);
         }
     }
 
@@ -53,16 +69,28 @@ public sealed class DocumentParserService
         var list = new List<ParsedUnit>();
         using var doc = PdfDocument.Open(path);
         var pageNo = 0;
+        var hadPageFailure = false;
         foreach (var page in doc.GetPages())
         {
             pageNo++;
-            var sb = new StringBuilder();
-            foreach (var w in page.GetWords())
-                sb.Append(w.Text).Append(' ');
-            var text = sb.ToString().Trim();
-            if (text.Length > 0)
-                list.Add(new ParsedUnit("p." + pageNo, text));
+            try
+            {
+                var sb = new StringBuilder();
+                foreach (var w in page.GetWords())
+                    sb.Append(w.Text).Append(' ');
+                var text = sb.ToString().Trim();
+                if (text.Length > 0)
+                    list.Add(new ParsedUnit("p." + pageNo, text));
+            }
+            catch
+            {
+                hadPageFailure = true;
+            }
         }
+
+        if (list.Count == 0 && hadPageFailure)
+            throw new InvalidOperationException("PDF 페이지를 안전하게 읽지 못했습니다.");
+
         return list;
     }
 
@@ -84,50 +112,39 @@ public sealed class DocumentParserService
             : new List<ParsedUnit> { new(null, text) };
     }
 
-    private static IReadOnlyList<ParsedUnit> ParseXlsxOpenXml(string path)
+    private static IReadOnlyList<ParsedUnit> ParseExcel(string path)
     {
         var list = new List<ParsedUnit>();
-        using var doc = SpreadsheetDocument.Open(path, false);
-        var wbPart = doc.WorkbookPart;
-        if (wbPart is null) return list;
+        using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = ExcelReaderFactory.CreateReader(stream);
 
-        foreach (var sheet in wbPart.Workbook.Sheets!.Elements<DocumentFormat.OpenXml.Spreadsheet.Sheet>())
+        do
         {
-            var name = sheet.Name?.Value ?? "sheet";
-            var id = sheet.Id?.Value;
-            if (id is null) continue;
-            var wsPart = (WorksheetPart)wbPart.GetPartById(id);
+            var sheetName = reader.Name ?? "sheet";
             var sb = new StringBuilder();
-            var sheetData = wsPart.Worksheet.GetFirstChild<SheetData>();
-            if (sheetData is null) continue;
-            foreach (var row in sheetData.Elements<Row>())
+
+            while (reader.Read())
             {
-                foreach (var cell in row.Elements<Cell>())
+                for (int col = 0; col < reader.FieldCount; col++)
                 {
-                    var v = GetOpenXmlCellString(cell, wbPart);
-                    if (!string.IsNullOrWhiteSpace(v))
-                        sb.Append(v).Append(' ');
+                    var value = reader.GetValue(col);
+                    if (value != null && !Convert.IsDBNull(value))
+                    {
+                        var strValue = value.ToString();
+                        if (!string.IsNullOrWhiteSpace(strValue))
+                            sb.Append(strValue).Append(' ');
+                    }
                 }
                 sb.AppendLine();
             }
+
             var text = sb.ToString().Trim();
             if (text.Length > 0)
-                list.Add(new ParsedUnit("sheet: " + name, text));
-        }
-        return list;
-    }
+                list.Add(new ParsedUnit("sheet: " + sheetName, text));
 
-    private static string? GetOpenXmlCellString(Cell cell, WorkbookPart wbPart)
-    {
-        if (cell.DataType is not null && cell.DataType == CellValues.SharedString)
-        {
-            var si = int.Parse(cell.InnerText, System.Globalization.CultureInfo.InvariantCulture);
-            var items = wbPart.SharedStringTablePart?.SharedStringTable?.Elements<SharedStringItem>();
-            if (items is null) return null;
-            var item = items.ElementAtOrDefault(si);
-            return item?.InnerText;
-        }
-        return cell.CellValue?.Text;
+        } while (reader.NextResult());
+
+        return list;
     }
 
     private static IReadOnlyList<ParsedUnit> ParsePptxOpenXml(string path)
@@ -144,6 +161,7 @@ public sealed class DocumentParserService
             var relId = slideId.RelationshipId?.Value;
             if (relId is null) continue;
             var slidePart = (SlidePart)presPart.GetPartById(relId);
+            if (slidePart.Slide is null) continue;
             var sb = new StringBuilder();
             foreach (var t in slidePart.Slide.Descendants<DText>())
             {
@@ -158,64 +176,59 @@ public sealed class DocumentParserService
         return list;
     }
 
-    private static IReadOnlyList<ParsedUnit> ParseXls(string path)
+    private static string NormalizeAndValidatePath(string filePath)
     {
-        var list = new List<ParsedUnit>();
-        using var fs = File.OpenRead(path);
-        var wb = new HSSFWorkbook(fs);
-        for (var i = 0; i < wb.NumberOfSheets; i++)
-        {
-            var sheet = wb.GetSheetAt(i);
-            var sb = new StringBuilder();
-            for (var r = sheet.FirstRowNum; r <= sheet.LastRowNum; r++)
-            {
-                var row = sheet.GetRow(r);
-                if (row is null) continue;
-                for (var c = row.FirstCellNum; c < row.LastCellNum; c++)
-                {
-                    var v = GetNpoiCellString(row.GetCell(c));
-                    if (!string.IsNullOrWhiteSpace(v))
-                        sb.Append(v).Append(' ');
-                }
-                sb.AppendLine();
-            }
-            var text = sb.ToString().Trim();
-            if (text.Length > 0)
-                list.Add(new ParsedUnit("sheet: " + sheet.SheetName, text));
-        }
-        return list;
-    }
+        if (string.IsNullOrWhiteSpace(filePath))
+            throw new InvalidOperationException("파일 경로가 비어 있습니다.");
 
-    private static string? GetNpoiCellString(ICell? cell)
-    {
-        if (cell is null) return null;
-        return cell.CellType switch
+        string fullPath;
+        try
         {
-            NPOI.SS.UserModel.CellType.String => cell.StringCellValue,
-            NPOI.SS.UserModel.CellType.Numeric => cell.NumericCellValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            NPOI.SS.UserModel.CellType.Boolean => cell.BooleanCellValue.ToString(),
-            NPOI.SS.UserModel.CellType.Formula => cell.CellFormula,
-            _ => null
-        };
+            fullPath = Path.GetFullPath(filePath);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException("잘못된 파일 경로입니다.", ex);
+        }
+
+        if (!File.Exists(fullPath))
+            throw new FileNotFoundException("선택한 파일을 찾을 수 없습니다.", fullPath);
+
+        var attrs = File.GetAttributes(fullPath);
+        if ((attrs & FileAttributes.Directory) != 0)
+            throw new InvalidOperationException("폴더는 업로드할 수 없습니다.");
+
+        var ext = Path.GetExtension(fullPath);
+        if (string.IsNullOrWhiteSpace(ext) || !SupportedExtensions.Contains(ext))
+            throw new InvalidOperationException("지원하지 않는 파일 형식입니다.");
+
+        var info = new FileInfo(fullPath);
+        if (info.Length > MaxAcceptedFileBytes)
+            throw new InvalidOperationException(
+                $"보안을 위해 {MaxAcceptedFileBytes / (1024 * 1024)}MB 이하 파일만 업로드할 수 있습니다.");
+
+        return fullPath;
     }
 
     private static IReadOnlyList<ParsedUnit> ParseImage(string path)
     {
-        var tessdata = FindTessdataPath();
-        if (tessdata is null)
-            return new List<ParsedUnit> { new(null, "이미지 파일: " + System.IO.Path.GetFileName(path) + " (OCR 언어 데이터 없음)") };
+        if (!OperatingSystem.IsWindows())
+            return new List<ParsedUnit> { new(null, "이미지 OCR은 Windows에서만 지원됩니다.") };
 
         try
         {
-            var lang = DetectLanguage(tessdata);
-            using var engine = new TesseractEngine(tessdata, lang, EngineMode.Default);
-            engine.SetVariable("debug_file", "NUL");
-            using var img = Pix.LoadFromFile(path);
-            using var page = engine.Process(img);
-            var text = page.GetText()?.Trim() ?? string.Empty;
+            var text = RunWindowsOcr(path);
             if (text.Length > 0)
                 return new List<ParsedUnit> { new(null, text) };
             return new List<ParsedUnit> { new(null, "이미지 파일: " + System.IO.Path.GetFileName(path) + " (텍스트 없음)") };
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("OCR", StringComparison.Ordinal))
+        {
+            return new List<ParsedUnit>
+            {
+                new(null, "이미지 파일: " + System.IO.Path.GetFileName(path) +
+                          " (Windows OCR 미설치 — 설정 > 시간 및 언어 > 언어에서 한국어/영어 OCR 옵션 추가)")
+            };
         }
         catch
         {
@@ -223,49 +236,38 @@ public sealed class DocumentParserService
         }
     }
 
-    private static string? FindTessdataPath()
+    /// <summary>
+    /// WinRT OCR은 UI 스레드에서 <c>GetAwaiter().GetResult()</c>로 동기 대기하면
+    /// Dispatcher로의 연속 마샬링 때문에 데드락이 날 수 있어, 항상 스레드 풀에서 실행합니다.
+    /// </summary>
+    private static string RunWindowsOcr(string path) =>
+        Task.Run(() => RunWindowsOcrAsync(path).GetAwaiter().GetResult()).GetAwaiter().GetResult();
+
+    private static async Task<string> RunWindowsOcrAsync(string path)
     {
-        var home = AppPaths.AppHomeDir;
-        var userHome = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string[] candidates =
-        {
-            System.IO.Path.Combine(home, "tesseract", "tessdata"),
-            System.IO.Path.Combine(home, "tessdata"),
-            Environment.GetEnvironmentVariable("TESSDATA_PREFIX") ?? "",
-            System.IO.Path.Combine(userHome, "qman", "tessdata"),
-            "tessdata",
-            System.IO.Path.Combine(Directory.GetCurrentDirectory(), "tessdata"),
-            @"C:\Program Files\Tesseract-OCR\tessdata",
-            @"C:\Program Files (x86)\Tesseract-OCR\tessdata"
-        };
+        await using var fileStream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var ras = fileStream.AsRandomAccessStream();
 
-        foreach (var p in candidates)
-        {
-            if (string.IsNullOrWhiteSpace(p)) continue;
-            try
-            {
-                if (Directory.Exists(p) &&
-                    (File.Exists(System.IO.Path.Combine(p, "eng.traineddata")) ||
-                     File.Exists(System.IO.Path.Combine(p, "kor.traineddata"))))
-                    return p;
-            }
-            catch { /* ignore */ }
-        }
+        var decoder = await BitmapDecoder.CreateAsync(ras).AsTask().ConfigureAwait(false);
+        using var softwareBitmap = await decoder.GetSoftwareBitmapAsync(
+            BitmapPixelFormat.Bgra8,
+            BitmapAlphaMode.Premultiplied,
+            new BitmapTransform(),
+            ExifOrientationMode.RespectExifOrientation,
+            ColorManagementMode.ColorManageToSRgb).AsTask().ConfigureAwait(false);
 
-        return null;
-    }
+        var engine = OcrEngine.TryCreateFromLanguage(new Language("ko"))
+            ?? OcrEngine.TryCreateFromLanguage(new Language("ko-KR"))
+            ?? OcrEngine.TryCreateFromUserProfileLanguages()
+            ?? OcrEngine.TryCreateFromLanguage(new Language("en-US"))
+            ?? OcrEngine.TryCreateFromLanguage(new Language("en"));
+        if (engine is null)
+            throw new InvalidOperationException("OCR 엔진을 만들 수 없습니다. Windows에 OCR용 언어 팩이 있는지 확인하세요.");
 
-    private static string DetectLanguage(string tessdataPath)
-    {
-        try
-        {
-            var hasKor = File.Exists(System.IO.Path.Combine(tessdataPath, "kor.traineddata"));
-            var hasEng = File.Exists(System.IO.Path.Combine(tessdataPath, "eng.traineddata"));
-            if (hasKor && hasEng) return "kor+eng";
-            if (hasKor) return "kor";
-            if (hasEng) return "eng";
-        }
-        catch { /* ignore */ }
-        return "eng";
+        var result = await engine.RecognizeAsync(softwareBitmap).AsTask().ConfigureAwait(false);
+        var sb = new StringBuilder();
+        foreach (var line in result.Lines)
+            sb.AppendLine(line.Text);
+        return sb.ToString().Trim();
     }
 }

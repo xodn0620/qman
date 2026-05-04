@@ -36,7 +36,7 @@ public sealed class ClaudeClient : ILlmClient
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"OpenAI 임베딩 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+            throw LlmHttpErrors.HttpFailure("OpenAI", "임베딩", resp.StatusCode, respBody);
 
         using var doc = JsonDocument.Parse(respBody);
         var emb = doc.RootElement.GetProperty("data")[0].GetProperty("embedding");
@@ -66,7 +66,7 @@ public sealed class ClaudeClient : ILlmClient
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Claude 채팅 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+            throw LlmHttpErrors.HttpFailure("Claude", "채팅", resp.StatusCode, respBody);
 
         using var doc = JsonDocument.Parse(respBody);
         var content = doc.RootElement.GetProperty("content");

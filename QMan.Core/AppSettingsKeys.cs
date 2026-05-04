@@ -4,6 +4,8 @@ namespace QMan.Core;
 public static class AppSettingsKeys
 {
     public const string SetupComplete = "cfg.setup_complete";
+    /// <summary>1이면 매뉴얼 업로드 전 DRM 안내를 다시 표시하지 않음.</summary>
+    public const string UiDrUploadNoticeSuppressed = "cfg.ui.dr_upload_notice_suppressed";
     public const string LlmProviderKey = "cfg.llm.provider";
     /// <summary>구버전 단일 저장(마이그레이션·폴백용).</summary>
     public const string ChatModel = "cfg.llm.chat_model";
@@ -28,6 +30,19 @@ public static class AppSettingsKeys
     [
         "openai", "ollama", "claude", "googleai", "alibabacloud", "dsplayground"
     ];
+
+    public static bool IsSensitiveKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        if (key is ApiKey or OpenAiApiKey or EmbeddingApiKey or ProfileClaudeEmbeddingApiKey)
+            return true;
+
+        return key.StartsWith(ProfilePrefix, StringComparison.Ordinal) &&
+               (key.EndsWith(".api_key", StringComparison.Ordinal) ||
+                key.EndsWith(".embedding_api_key", StringComparison.Ordinal));
+    }
 
     public static string ProviderTag(LlmProvider p) => p switch
     {

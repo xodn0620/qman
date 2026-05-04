@@ -26,7 +26,7 @@ public sealed class GoogleAiClient : ILlmClient
         // text-embedding-004 등 레거시 ID는 v1beta embedContent에서 제거됨 → gemini-embedding-001 사용.
         var model = NormalizeEmbeddingModelId(_config.EmbeddingModel);
         var url =
-            $"{BaseBetaUrl()}/models/{Uri.EscapeDataString(model)}:embedContent?key={Uri.EscapeDataString(_config.OpenAiApiKey!)}";
+            $"{BaseBetaUrl()}/models/{Uri.EscapeDataString(model)}:embedContent";
 
         var body = new GoogleEmbedRequest
         {
@@ -39,6 +39,7 @@ public sealed class GoogleAiClient : ILlmClient
         };
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+        req.Headers.TryAddWithoutValidation("x-goog-api-key", _config.OpenAiApiKey);
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
@@ -47,11 +48,11 @@ public sealed class GoogleAiClient : ILlmClient
         using var doc = JsonDocument.Parse(respBody);
         var root = doc.RootElement;
         if (!root.TryGetProperty("embedding", out var emb))
-            throw new InvalidOperationException("Google AI 임베딩 응답 파싱 실패: " + respBody);
+            throw LlmHttpErrors.ParseFailure("Google AI", "임베딩");
 
         var values = emb.TryGetProperty("values", out var arr) ? arr : emb;
         if (values.ValueKind != JsonValueKind.Array)
-            throw new InvalidOperationException("Google AI 임베딩 응답 파싱 실패: " + respBody);
+            throw LlmHttpErrors.ParseFailure("Google AI", "임베딩");
 
         var v = new float[values.GetArrayLength()];
         var i = 0;
@@ -65,7 +66,7 @@ public sealed class GoogleAiClient : ILlmClient
         RequireKey();
         var model = NormalizeChatModelId(_config.ChatModel);
         var url =
-            $"{BaseBetaUrl()}/models/{Uri.EscapeDataString(model)}:generateContent?key={Uri.EscapeDataString(_config.OpenAiApiKey!)}";
+            $"{BaseBetaUrl()}/models/{Uri.EscapeDataString(model)}:generateContent";
 
         object body;
         if (string.IsNullOrWhiteSpace(system))
@@ -91,6 +92,7 @@ public sealed class GoogleAiClient : ILlmClient
         }
 
         using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = JsonContent.Create(body) };
+        req.Headers.TryAddWithoutValidation("x-goog-api-key", _config.OpenAiApiKey);
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
@@ -100,17 +102,14 @@ public sealed class GoogleAiClient : ILlmClient
         var root = doc.RootElement;
         if (!root.TryGetProperty("candidates", out var cand) || cand.ValueKind != JsonValueKind.Array ||
             cand.GetArrayLength() == 0)
-        {
-            var hint = root.TryGetProperty("promptFeedback", out var fb) ? fb.ToString() : respBody;
-            throw new InvalidOperationException("Google AI 응답에 후보 텍스트가 없습니다. " + hint);
-        }
+            throw LlmHttpErrors.ParseFailure("Google AI", "채팅", "후보 텍스트가 없습니다");
 
         var first = cand[0];
         if (!first.TryGetProperty("content", out var content))
-            throw new InvalidOperationException("Google AI 응답 파싱 실패: " + respBody);
+            throw LlmHttpErrors.ParseFailure("Google AI", "채팅");
 
         if (!content.TryGetProperty("parts", out var parts) || parts.ValueKind != JsonValueKind.Array)
-            throw new InvalidOperationException("Google AI 응답 파싱 실패: " + respBody);
+            throw LlmHttpErrors.ParseFailure("Google AI", "채팅");
 
         var sb = new System.Text.StringBuilder();
         foreach (var part in parts.EnumerateArray())
@@ -131,10 +130,7 @@ public sealed class GoogleAiClient : ILlmClient
 
     private string BaseBetaUrl()
     {
-        var u = _config.Url?.Trim();
-        if (string.IsNullOrWhiteSpace(u))
-            return "https://generativelanguage.googleapis.com/v1beta";
-        return u.TrimEnd('/');
+        return AppConfig.ResolveUserSuppliedBaseUrl(_config.Url, "https://generativelanguage.googleapis.com/v1beta");
     }
 
     private static string NormalizeChatModelId(string? model)
@@ -164,8 +160,9 @@ public sealed class GoogleAiClient : ILlmClient
                 "설정의 LLM 모델이 gemini-2.0-flash 라면 종료 예정 모델이라 한도가 0으로 나올 수 있어, gemini-2.5-flash-lite 또는 gemini-2.5-flash 로 바꿔 보세요.");
         }
 
-        var shortBody = respBody.Length > 800 ? respBody[..800] + "…" : respBody;
-        return new InvalidOperationException($"Google AI {operationKo} 실패: HTTP {(int)status} / {shortBody}");
+        var detail = TryExtractErrorSummary(respBody);
+        var suffix = string.IsNullOrWhiteSpace(detail) ? "" : $" ({detail})";
+        return new InvalidOperationException($"Google AI {operationKo} 실패: HTTP {(int)status}{suffix}");
     }
 
     private static int TryExtractRetrySecondsFromGoogleError(string respBody)
@@ -208,6 +205,29 @@ public sealed class GoogleAiClient : ILlmClient
         }
 
         return 0;
+    }
+
+    private static string? TryExtractErrorSummary(string respBody)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(respBody);
+            if (!doc.RootElement.TryGetProperty("error", out var err))
+                return null;
+            if (!err.TryGetProperty("message", out var msg) || msg.ValueKind != JsonValueKind.String)
+                return null;
+
+            var text = msg.GetString();
+            if (string.IsNullOrWhiteSpace(text))
+                return null;
+
+            text = string.Join(" ", text.Split(new[] { '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries)).Trim();
+            return text.Length <= 160 ? text : text[..160] + "…";
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string NormalizeEmbeddingModelId(string? model)

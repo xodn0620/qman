@@ -39,7 +39,7 @@ public sealed class AppContextRoot : IDisposable
         Embeddings = new EmbeddingDao(Db.Connection);
         Vec = new VecDao(Db);
 
-        Llm = Config.LlmProvider switch
+        ILlmClient llmCore = Config.LlmProvider switch
         {
             LlmProvider.Ollama => new OllamaClient(Config),
             LlmProvider.Claude => new ClaudeClient(Config),
@@ -48,6 +48,7 @@ public sealed class AppContextRoot : IDisposable
             LlmProvider.DsPlayground => new OpenAiClient(Config),
             _ => new OpenAiClient(Config)
         };
+        Llm = new LlmChatTokenBudgetClient(llmCore);
 
         Search = new SearchService(Db, Vec);
         Rag = new RagService(Config, Db, Llm, Search, Embeddings, Vec);

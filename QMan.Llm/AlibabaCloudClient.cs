@@ -37,7 +37,7 @@ public sealed class AlibabaCloudClient : ILlmClient
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Alibaba Cloud 임베딩 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+            throw LlmHttpErrors.HttpFailure("Alibaba Cloud", "임베딩", resp.StatusCode, respBody);
 
         using var doc = JsonDocument.Parse(respBody);
         var root = doc.RootElement;
@@ -57,7 +57,7 @@ public sealed class AlibabaCloudClient : ILlmClient
                 return ParseFloatArray(single);
         }
 
-        throw new InvalidOperationException("Alibaba Cloud 임베딩 응답 파싱 실패: " + respBody);
+        throw LlmHttpErrors.ParseFailure("Alibaba Cloud", "임베딩");
     }
 
     public async Task<string> ChatAsync(string system, string user, CancellationToken ct = default)
@@ -81,7 +81,7 @@ public sealed class AlibabaCloudClient : ILlmClient
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         if (!resp.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Alibaba Cloud 채팅 실패: HTTP {(int)resp.StatusCode} / {respBody}");
+            throw LlmHttpErrors.HttpFailure("Alibaba Cloud", "채팅", resp.StatusCode, respBody);
 
         using var doc = JsonDocument.Parse(respBody);
         var root = doc.RootElement;
@@ -94,10 +94,7 @@ public sealed class AlibabaCloudClient : ILlmClient
 
     private string ResolveChatUrl()
     {
-        var u = _config.Url;
-        if (string.IsNullOrWhiteSpace(u))
-            u = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-        u = u.Trim();
+        var u = AppConfig.ResolveUserSuppliedBaseUrl(_config.Url, "https://dashscope.aliyuncs.com/compatible-mode/v1");
         if (u.EndsWith("/v1", StringComparison.OrdinalIgnoreCase)) return u + "/chat/completions";
         if (u.EndsWith("/")) return u + "chat/completions";
         if (u.Contains("/chat/", StringComparison.OrdinalIgnoreCase)) return u;

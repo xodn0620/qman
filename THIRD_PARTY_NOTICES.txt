@@ -1,0 +1,77 @@
+Q-Man — 서드파티·런타임 고지 (Third-party and runtime notices)
+================================================================
+
+본 파일은 배포·감사 시 참고용입니다. 법적 해석은 법무에 문의하세요.
+
+1) 본 애플리케이션(Q-Man) 자체 라이선스
+----------------------------------------
+저장소 루트의 LICENSE 파일을 참조하세요.
+
+
+2) .NET 런타임 (Self-contained / 단일 파일 publish 포함 시)
+------------------------------------------------------------
+Microsoft .NET 런타임 및 관련 구성 요소를 재배포하는 경우 Microsoft의
+이용·재배포 조항을 준수해야 합니다.
+
+  https://dotnet.microsoft.com/
+  https://github.com/dotnet/core/blob/main/LICENSE.TXT
+
+
+3) sqlite-vec (네이티브 확장, 선택적 번들)
+------------------------------------------
+QMan.exe에 임베드하거나 native\ 등으로 함께 배포하는 sqlite-vec 바이너리는
+Alex Garcia(asg017) 프로젝트이며, MIT 또는 Apache License 2.0 중 하나를
+선택 적용할 수 있는 이중 라이선스입니다. 재배포 시 해당 라이선스의
+저작권·허가 문구 유지 의무를 따르세요.
+
+  https://github.com/asg017/sqlite-vec
+  (저장소 내 LICENSE-MIT, LICENSE-APACHE 참고)
+
+
+4) Microsoft.Data.Sqlite / SQLite (e_sqlite3)
+----------------------------------------------
+Microsoft.Data.Sqlite 패키지 및 SQLite 네이티브 라이브러리는 각각
+Microsoft 및 SQLite 프로젝트 라이선스를 따릅니다.
+
+  https://www.sqlite.org/copyright.html
+
+
+5) UglyToad.PdfPig 1.7.0-custom-5 (출처·라이선스 메타 확인 결과)
+---------------------------------------------------------------
+  • 저장소 루트에 nuget.config 등 **추가 NuGet 피드 설정이 없음**이면, 기본적으로
+    nuget.org 에서 복원됩니다. (빌드 PC의 `dotnet nuget list source` 로 재확인 권장.)
+  • 동일 버전은 NuGet Gallery에 **prerelease** 로 등록되어 있습니다.
+      https://www.nuget.org/packages/UglyToad.PdfPig/1.7.0-custom-5
+  • 해당 패키지 페이지의 License 메타는 **비어 있을 수 있음**(NuGet에 license
+    표기 없음). 실무적으로는 upstream 저장소의 LICENSE·NOTICE를 따릅니다.
+      https://github.com/UglyToad/PdfPig
+  • 사내에서 **다른 피드의 동일 버전 ID**를 쓰거나 패키지를 재서명한 경우에는
+    위와 무관하므로, 그 피드·빌드 산출물의 조항을 별도 확인해야 합니다.
+
+
+6) 직접·전이적 NuGet 패키지 요약 (주요 항목)
+--------------------------------------------
+아래는 `dotnet list package --include-transitive` 기준 일부입니다.
+정확한 조항은 각 패키지의 LICENSE 표기 및 nuget.org 패키지 페이지를
+확인하세요.
+
+  DocumentFormat.OpenXml (+ Framework)     — MIT (Microsoft)
+  ExcelDataReader                          — MIT
+  System.Text.Json, System.Net.Http.Json 등 — MIT (.NET 라이브러리)
+  SharpZipLib                              — MIT
+  BouncyCastle.Cryptography                — MIT
+  SQLitePCLRaw.*                           — Apache-2.0
+  System.Text.Encoding.CodePages           — MIT
+
+전체 목록은 빌드 환경에서 다음으로 갱신할 수 있습니다.
+  dotnet list QMan.App\QMan.App.csproj package --include-transitive
+
+
+7) 배포물에 포함할 것
+--------------------
+- LICENSE
+- 본 파일(THIRD_PARTY_NOTICES.txt)
+- (sqlite-vec를 번들하는 경우) 위 3)에 따른 고지 유지
+
+빌드 시 QMan 출력 폴더로 LICENSE·THIRD_PARTY_NOTICES.txt가 복사되도록
+구성되어 있습니다.

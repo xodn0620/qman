@@ -226,8 +226,63 @@ public sealed class AppConfig
     /// <summary>sqlite-vec DLL 캐시 경로(안내용).</summary>
     public static string SqliteVecCacheHintDir => AppPaths.SqliteVecCacheDir;
 
+    public static void ValidateUserSuppliedUrl(string? configuredUrl)
+    {
+        if (string.IsNullOrWhiteSpace(configuredUrl))
+            return;
+
+        _ = NormalizeValidatedUserBaseUrl(configuredUrl);
+    }
+
+    public static string ResolveUserSuppliedBaseUrl(string? configuredUrl, string defaultBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(configuredUrl))
+            return defaultBaseUrl.TrimEnd('/');
+
+        return NormalizeValidatedUserBaseUrl(configuredUrl);
+    }
+
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+    private static string NormalizeValidatedUserBaseUrl(string configuredUrl)
+    {
+        var trimmed = configuredUrl.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            throw new InvalidOperationException(
+                "API URL 형식이 올바르지 않습니다. http:// 또는 https:// 로 시작하는 절대 URL을 입력해 주세요.");
+        }
+
+        var isHttps = string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        var isHttp = string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase);
+        if (!isHttps && !isHttp)
+            throw new InvalidOperationException("API URL은 http:// 또는 https:// 만 사용할 수 있습니다.");
+
+        if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            throw new InvalidOperationException(
+                "API URL에는 쿼리 문자열(?)이나 fragment(#)를 넣을 수 없습니다.");
+        }
+
+        if (isHttp && !IsLoopbackUri(uri))
+        {
+            throw new InvalidOperationException(
+                "보안을 위해 사용자 지정 API URL은 HTTPS만 허용합니다. " +
+                "로컬 테스트용 localhost/127.0.0.1/::1 만 HTTP를 사용할 수 있습니다.");
+        }
+
+        return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+    }
+
+    private static bool IsLoopbackUri(Uri uri)
+    {
+        if (uri.IsLoopback)
+            return true;
+
+        return System.Net.IPAddress.TryParse(uri.Host, out var ip) &&
+               System.Net.IPAddress.IsLoopback(ip);
+    }
 
     public static LlmProvider ParseLlmProvider(string? raw)
     {

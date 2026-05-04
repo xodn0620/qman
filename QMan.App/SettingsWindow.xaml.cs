@@ -63,8 +63,8 @@ public partial class SettingsWindow : Window
                 // 타사 -> DS: 이전(타사) 화면 내용을 프로필에 반영
                 var inferred = LlmEndpointInference.Infer(
                     UrlBox.Text.Trim(),
-                    ApiKeyBox.Text.Trim(),
-                    EmbeddingApiKeyBox.Text.Trim());
+                    GetMainApiKey(),
+                    GetEmbeddingApiKey());
                 var tag = AppSettingsKeys.ProviderTag(inferred);
                 FlushFormToState(tag);
                 _thirdPartyFormTag = tag;
@@ -82,6 +82,13 @@ public partial class SettingsWindow : Window
     }
 
     private void FormInferenceFields_OnTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_uiReady)
+            return;
+        RefreshInferredPanels();
+    }
+
+    private void SecretFields_OnPasswordChanged(object sender, RoutedEventArgs e)
     {
         if (!_uiReady)
             return;
@@ -112,8 +119,8 @@ public partial class SettingsWindow : Window
         InferenceHint.Visibility = Visibility.Visible;
         var p = LlmEndpointInference.Infer(
             UrlBox.Text.Trim(),
-            ApiKeyBox.Text.Trim(),
-            EmbeddingApiKeyBox.Text.Trim());
+            GetMainApiKey(),
+            GetEmbeddingApiKey());
 
         var showEmb = p == LlmProvider.Claude;
         PanelEmbeddingApiKey.Visibility = showEmb ? Visibility.Visible : Visibility.Collapsed;
@@ -157,8 +164,8 @@ public partial class SettingsWindow : Window
         ChatModelBox.Text = s.ChatModel;
         EmbeddingModelBox.Text = s.EmbeddingModel;
         UrlBox.Text = s.Url;
-        ApiKeyBox.Text = s.MainApiKey;
-        EmbeddingApiKeyBox.Text = s.ClaudeEmbeddingApiKey;
+        ApiKeyBox.Password = s.MainApiKey;
+        EmbeddingApiKeyBox.Password = s.ClaudeEmbeddingApiKey;
     }
 
     private void FlushFormToState(string tag)
@@ -167,8 +174,8 @@ public partial class SettingsWindow : Window
         s.ChatModel = ChatModelBox.Text.Trim();
         s.EmbeddingModel = EmbeddingModelBox.Text.Trim();
         s.Url = UrlBox.Text.Trim();
-        s.MainApiKey = ApiKeyBox.Text.Trim();
-        s.ClaudeEmbeddingApiKey = EmbeddingApiKeyBox.Text.Trim();
+        s.MainApiKey = GetMainApiKey();
+        s.ClaudeEmbeddingApiKey = GetEmbeddingApiKey();
     }
 
     private void Save_OnClick(object sender, RoutedEventArgs e)
@@ -186,8 +193,8 @@ public partial class SettingsWindow : Window
         {
             var inferred = LlmEndpointInference.Infer(
                 UrlBox.Text.Trim(),
-                ApiKeyBox.Text.Trim(),
-                EmbeddingApiKeyBox.Text.Trim());
+                GetMainApiKey(),
+                GetEmbeddingApiKey());
             activeTag = AppSettingsKeys.ProviderTag(inferred);
             FlushFormToState(activeTag);
             _thirdPartyFormTag = activeTag;
@@ -224,6 +231,9 @@ public partial class SettingsWindow : Window
 
         try
         {
+            foreach (var state in _stateByTag.Values)
+                AppConfig.ValidateUserSuppliedUrl(state.Url);
+
             ctx.Settings.SaveAllProviderProfiles(_stateByTag, activeTag, markSetupComplete: true);
         }
         catch (Exception ex)
@@ -237,4 +247,7 @@ public partial class SettingsWindow : Window
 
     private void Cancel_OnClick(object sender, RoutedEventArgs e) => DialogResult = false;
 
+    private string GetMainApiKey() => ApiKeyBox.Password.Trim();
+
+    private string GetEmbeddingApiKey() => EmbeddingApiKeyBox.Password.Trim();
 }

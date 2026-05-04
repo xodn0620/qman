@@ -43,8 +43,8 @@
 
                 <StackPanel x:Name="PanelApiKey" Margin="0,0,0,12">
                     <TextBlock x:Name="ApiKeyLabel" Text="LLM API 키 (선택 — 비우면 환경 변수 또는 로컬 백엔드)" FontSize="12" Foreground="{StaticResource BrushMuted}" Margin="0,0,0,4"/>
-                    <TextBox x:Name="ApiKeyBox" FontSize="14" Padding="8,6" TextWrapping="NoWrap"
-                             TextChanged="FormInferenceFields_OnTextChanged"/>
+                    <PasswordBox x:Name="ApiKeyBox" FontSize="14" Padding="8,6"
+                                 PasswordChanged="SecretFields_OnPasswordChanged"/>
                 </StackPanel>
 
                 <StackPanel x:Name="PanelEmbeddingApiKey" Margin="0,0,0,12" Visibility="Collapsed">
@@ -55,8 +55,8 @@
                     <TextBlock x:Name="ClaudeEmbeddingKeyHint" Text="Anthropic으로 채팅할 때 임베딩은 OpenAI 호환 키가 필요합니다."
                                FontSize="11" Foreground="{StaticResource BrushMuted}" TextWrapping="Wrap" Margin="0,0,0,6"
                                Visibility="Collapsed"/>
-                    <TextBox x:Name="EmbeddingApiKeyBox" FontSize="14" Padding="8,6"
-                             TextChanged="FormInferenceFields_OnTextChanged"/>
+                    <PasswordBox x:Name="EmbeddingApiKeyBox" FontSize="14" Padding="8,6"
+                                 PasswordChanged="SecretFields_OnPasswordChanged"/>
                 </StackPanel>
 
                 <StackPanel x:Name="PanelUrl" VerticalAlignment="Top" Margin="0,0,0,8">

@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
+using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
 using QMan.Core;
 
@@ -6,6 +9,8 @@ namespace QMan.Data;
 
 public sealed class AppSettingsDao
 {
+    private const string ProtectedPrefix = "dpapi:v1:";
+    private static readonly byte[] ProtectedEntropy = Encoding.UTF8.GetBytes("QMan.AppSettings.v1");
     private readonly SqliteConnection _conn;
 
     public AppSettingsDao(SqliteConnection conn) => _conn = conn;
@@ -26,7 +31,10 @@ public sealed class AppSettingsDao
         cmd.CommandText = "SELECT key, value FROM app_kv WHERE key LIKE 'cfg.%';";
         using var rd = cmd.ExecuteReader();
         while (rd.Read())
-            d[rd.GetString(0)] = rd.GetString(1);
+        {
+            var key = rd.GetString(0);
+            d[key] = DecodeStoredValue(key, rd.GetString(1));
+        }
         return d;
     }
 
@@ -35,7 +43,17 @@ public sealed class AppSettingsDao
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = "SELECT value FROM app_kv WHERE key = $k LIMIT 1;";
         cmd.Parameters.AddWithValue("$k", key);
-        return cmd.ExecuteScalar() as string;
+        var raw = cmd.ExecuteScalar() as string;
+        return raw is null ? null : DecodeStoredValue(key, raw);
+    }
+
+    public void UpsertKey(string key, string value)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = "INSERT OR REPLACE INTO app_kv(key, value) VALUES ($k, $v);";
+        cmd.Parameters.AddWithValue("$k", key);
+        cmd.Parameters.AddWithValue("$v", EncodeStoredValue(key, value));
+        cmd.ExecuteNonQuery();
     }
 
     /// <summary>제공자별 프로필을 저장하고, 구버전 단일 키(cfg.llm.chat_model 등)는 제거합니다.</summary>
@@ -157,8 +175,46 @@ public sealed class AppSettingsDao
         cmd.Transaction = tx;
         cmd.CommandText = "INSERT OR REPLACE INTO app_kv(key, value) VALUES ($k, $v);";
         cmd.Parameters.AddWithValue("$k", key);
-        cmd.Parameters.AddWithValue("$v", value);
+        cmd.Parameters.AddWithValue("$v", EncodeStoredValue(key, value));
         cmd.ExecuteNonQuery();
+    }
+
+    public static void ProtectStoredSecrets(SqliteConnection conn)
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var tx = conn.BeginTransaction();
+        using var read = conn.CreateCommand();
+        read.Transaction = tx;
+        read.CommandText = "SELECT key, value FROM app_kv WHERE key LIKE 'cfg.%';";
+
+        var rewrites = new List<KeyValuePair<string, string>>();
+        using (var rd = read.ExecuteReader())
+        {
+            while (rd.Read())
+            {
+                var key = rd.GetString(0);
+                var value = rd.GetString(1);
+                if (!AppSettingsKeys.IsSensitiveKey(key))
+                    continue;
+                if (string.IsNullOrWhiteSpace(value) || value.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
+                    continue;
+                rewrites.Add(new KeyValuePair<string, string>(key, EncodeStoredValue(key, value)));
+            }
+        }
+
+        foreach (var item in rewrites)
+        {
+            using var write = conn.CreateCommand();
+            write.Transaction = tx;
+            write.CommandText = "UPDATE app_kv SET value = $v WHERE key = $k;";
+            write.Parameters.AddWithValue("$k", item.Key);
+            write.Parameters.AddWithValue("$v", item.Value);
+            write.ExecuteNonQuery();
+        }
+
+        tx.Commit();
     }
 
     /// <summary>기존 config.json이 있으면 DB로 한 번 옮기고 파일을 삭제합니다.</summary>
@@ -204,7 +260,7 @@ public sealed class AppSettingsDao
                 cmd.Transaction = tx;
                 cmd.CommandText = "INSERT OR REPLACE INTO app_kv(key, value) VALUES ($k, $v);";
                 cmd.Parameters.AddWithValue("$k", kv.Key);
-                cmd.Parameters.AddWithValue("$v", kv.Value);
+                cmd.Parameters.AddWithValue("$v", EncodeStoredValue(kv.Key, kv.Value));
                 cmd.ExecuteNonQuery();
             }
 
@@ -216,12 +272,76 @@ public sealed class AppSettingsDao
             }
             catch
             {
-                // ignore
+                // 삭제 실패 시 안전하게 파일 내용을 덮어씁니다.
+                try
+                {
+                    File.WriteAllText(path, "{}");
+                }
+                catch
+                {
+                    // 마지막으로 아무 것도 못하면 무시
+                }
             }
         }
         catch
         {
             // 손상된 JSON 등은 무시
         }
+    }
+
+    private static string EncodeStoredValue(string key, string value)
+    {
+        if (!AppSettingsKeys.IsSensitiveKey(key) || string.IsNullOrWhiteSpace(value))
+            return value;
+        if (value.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
+            return value;
+        if (!OperatingSystem.IsWindows())
+            return value;
+
+        try
+        {
+            return ProtectOnWindows(value);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "민감한 설정을 Windows 보호 저장소(DPAPI)로 암호화하지 못했습니다. " +
+                "API 키를 평문으로 저장하지 않도록 저장을 중단합니다.", ex);
+        }
+    }
+
+    private static string DecodeStoredValue(string key, string value)
+    {
+        if (!AppSettingsKeys.IsSensitiveKey(key) || string.IsNullOrWhiteSpace(value))
+            return value;
+        if (!value.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
+            return value;
+        if (!OperatingSystem.IsWindows())
+            return string.Empty;
+
+        try
+        {
+            return UnprotectOnWindows(value);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string ProtectOnWindows(string value)
+    {
+        var plain = Encoding.UTF8.GetBytes(value);
+        var protectedBytes = ProtectedData.Protect(plain, ProtectedEntropy, DataProtectionScope.CurrentUser);
+        return ProtectedPrefix + Convert.ToBase64String(protectedBytes);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static string UnprotectOnWindows(string value)
+    {
+        var payload = Convert.FromBase64String(value[ProtectedPrefix.Length..]);
+        var plain = ProtectedData.Unprotect(payload, ProtectedEntropy, DataProtectionScope.CurrentUser);
+        return Encoding.UTF8.GetString(plain);
     }
 }

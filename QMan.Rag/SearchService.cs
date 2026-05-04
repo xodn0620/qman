@@ -5,6 +5,7 @@ namespace QMan.Rag;
 
 public sealed class SearchService
 {
+    private const int MaxFallbackCandidateCount = 5000;
     public sealed record SearchHit(
         long ChunkId,
         long DocumentId,
@@ -89,6 +90,17 @@ public sealed class SearchService
 
     private IReadOnlyList<SearchHit> FallbackCosineSearch(float[] queryEmbedding, int topK, long? categoryId)
     {
+        if (topK <= 0 || queryEmbedding.Length == 0)
+            return Array.Empty<SearchHit>();
+
+        var candidateCount = CountFallbackCandidates(categoryId);
+        if (candidateCount > MaxFallbackCandidateCount)
+        {
+            throw new InvalidOperationException(
+                $"벡터 인덱스를 사용할 수 없어 폴백 검색을 시도했지만, 대상 청크가 {candidateCount:N0}건으로 너무 많아 안전하게 처리할 수 없습니다. " +
+                "벡터 인덱스를 복구하거나 검색 범위를 더 좁혀 주세요.");
+        }
+
         var sql = categoryId is null
             ? """
               SELECT e.chunk_id, e.embedding_json, c.document_id, d.original_name, c.source_label, c.content
@@ -104,7 +116,7 @@ public sealed class SearchService
               WHERE d.category_id = $cat;
               """;
 
-        var scored = new List<SearchHit>();
+        var best = new PriorityQueue<SearchHit, double>();
         using var cmd = _conn.CreateCommand();
         cmd.CommandText = sql;
         if (categoryId is not null)
@@ -119,18 +131,43 @@ public sealed class SearchService
             if (emb.Length != queryEmbedding.Length)
                 continue;
             var cos = EmbeddingUtil.Cosine(queryEmbedding, emb);
-            scored.Add(new SearchHit(
+            best.Enqueue(new SearchHit(
                 chunkId,
                 rd.GetInt64(2),
                 rd.GetString(3),
                 rd.IsDBNull(4) ? null : rd.GetString(4),
                 rd.GetString(5),
-                cos));
+                cos), cos);
+            if (best.Count > topK)
+                best.Dequeue();
         }
 
-        return scored
+        return best.UnorderedItems
+            .Select(x => x.Element)
             .OrderByDescending(h => h.Score)
-            .Take(topK)
             .ToList();
+    }
+
+    private int CountFallbackCandidates(long? categoryId)
+    {
+        using var cmd = _conn.CreateCommand();
+        cmd.CommandText = categoryId is null
+            ? """
+              SELECT COUNT(*)
+              FROM chunk_embeddings e
+              JOIN chunks c ON c.id = e.chunk_id;
+              """
+            : """
+              SELECT COUNT(*)
+              FROM chunk_embeddings e
+              JOIN chunks c ON c.id = e.chunk_id
+              JOIN documents d ON d.id = c.document_id
+              WHERE d.category_id = $cat;
+              """;
+        if (categoryId is not null)
+            cmd.Parameters.AddWithValue("$cat", categoryId.Value);
+
+        var value = cmd.ExecuteScalar();
+        return value is null || value is DBNull ? 0 : Convert.ToInt32(value, System.Globalization.CultureInfo.InvariantCulture);
     }
 }

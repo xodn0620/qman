@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Microsoft.Win32;
+using QMan.Core;
 using QMan.Data;
 
 namespace QMan.App;
@@ -724,6 +725,16 @@ public partial class MainWindow : Window
             return;
         }
 
+        var ctx = AppContextRoot.Instance;
+        if (ctx.Settings.Get(AppSettingsKeys.UiDrUploadNoticeSuppressed) != "1")
+        {
+            var reminder = new DrUploadReminderWindow { Owner = this };
+            if (reminder.ShowDialog() != true)
+                return;
+            if (reminder.DoNotShowAgain)
+                ctx.Settings.UpsertKey(AppSettingsKeys.UiDrUploadNoticeSuppressed, "1");
+        }
+
         var dlg = new OpenFileDialog
         {
             Title = "문서 업로드",
@@ -738,7 +749,6 @@ public partial class MainWindow : Window
         UploadStatus.Text = "업로드/인덱싱 중...";
         try
         {
-            var ctx = AppContextRoot.Instance;
             var res = ctx.Ingestion.Ingest(categoryId, path);
             var total = res.ChunkIds.Count;
             for (var i = 0; i < total; i++)
