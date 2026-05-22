@@ -203,16 +203,103 @@
                                     Margin="0,0,10,0" Padding="20,10" Click="Upload_OnClick"/>
                             <Button Content="문서 삭제" Style="{StaticResource DangerOutlineButton}"
                                     Margin="0,0,10,0" Click="DeleteDoc_OnClick"/>
-                            <ProgressBar x:Name="UploadProgress" Width="200" Margin="20,0,0,0"
-                                         VerticalAlignment="Center" Visibility="Collapsed" IsIndeterminate="True"/>
-                            <TextBlock x:Name="UploadStatus" Margin="12,0,0,0" VerticalAlignment="Center"
-                                       Foreground="{StaticResource BrushMuted}" FontSize="12"/>
+                            
+                            <!-- 업로드 진행 상황 패널 -->
+                            <Border x:Name="UploadProgressPanel" 
+                                    Visibility="Collapsed"
+                                    Background="{StaticResource BrushSurface}"
+                                    BorderBrush="{StaticResource BrushBorder}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="12,8"
+                                    Margin="20,0,0,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <ProgressBar x:Name="UploadProgress" 
+                                                 Width="120" Height="20"
+                                                 VerticalAlignment="Center"
+                                                 IsIndeterminate="True"/>
+                                    <TextBlock x:Name="UploadStatus" 
+                                               Margin="10,0,0,0" 
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource BrushMuted}" 
+                                               FontSize="12"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
+                        
+                        <!-- 업로드 큐 리스트 (업로드 중일 때만 표시) -->
+                        <Border x:Name="UploadQueuePanel"
+                                DockPanel.Dock="Top"
+                                Visibility="Collapsed"
+                                Background="{StaticResource BrushSurface}"
+                                BorderBrush="{StaticResource BrushBorder}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Padding="16"
+                                Margin="0,0,0,14"
+                                MaxHeight="300">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Top" 
+                                           Text="업로드 진행 중" 
+                                           Foreground="#333333"
+                                           FontWeight="SemiBold" 
+                                           FontSize="14"
+                                           Margin="0,0,0,10"/>
+                                
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <ItemsControl x:Name="UploadQueueList">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border Background="#F5F5F5" 
+                                                        CornerRadius="6" 
+                                                        Padding="12,8" 
+                                                        Margin="0,0,0,6">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="140"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        
+                                                        <!-- 파일명 -->
+                                                        <TextBlock Grid.Column="0" 
+                                                                   Text="{Binding FileName}"
+                                                                   Foreground="#333333"
+                                                                   VerticalAlignment="Center"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip="{Binding FileName}"/>
+                                                        
+                                                        <!-- 진행 바 -->
+                                                        <ProgressBar Grid.Column="1" 
+                                                                     Width="100" Height="16"
+                                                                     Value="{Binding Progress}"
+                                                                     Maximum="100"
+                                                                     Margin="10,0"
+                                                                     VerticalAlignment="Center"/>
+                                                        
+                                                        <!-- 상태 텍스트 -->
+                                                        <TextBlock Grid.Column="2" 
+                                                                   Text="{Binding StatusText}"
+                                                                   Foreground="{Binding StatusColor}"
+                                                                   FontSize="11"
+                                                                   FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center"
+                                                                   HorizontalAlignment="Right"/>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </Border>
+                        
+                        <!-- 기존 문서 목록 -->
                         <Border Background="{StaticResource BrushSurface}"
                                 BorderBrush="{StaticResource BrushBorder}" BorderThickness="1"
                                 CornerRadius="12" Padding="0" ClipToBounds="True">
                             <DataGrid x:Name="DocumentsGrid" AutoGenerateColumns="False" IsReadOnly="True"
-                                      SelectionMode="Single" CanUserAddRows="False"
+                                      SelectionMode="Extended" CanUserAddRows="False"
                                       BorderThickness="0" Background="Transparent">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="파일명" Binding="{Binding OriginalName}" Width="*"/>

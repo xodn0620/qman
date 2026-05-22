@@ -1,5 +1,8 @@
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
@@ -25,6 +28,7 @@ public partial class MainWindow : Window
     }
 
     private readonly Dictionary<long, List<ChatTurn>> _chatSessions = new();
+    private readonly ObservableCollection<UploadFileItem> _uploadQueue = new();
 
     public sealed class CategoryItem
     {
@@ -38,6 +42,98 @@ public partial class MainWindow : Window
         public string OriginalName { get; init; } = "";
         public string UploadedAt { get; init; } = "";
         public string SizeText { get; init; } = "";
+    }
+
+    public enum UploadFileStatus
+    {
+        Pending,
+        Uploading,
+        Embedding,
+        Completed,
+        Failed
+    }
+
+    public sealed class UploadFileItem : INotifyPropertyChanged
+    {
+        private UploadFileStatus _status;
+        private string _statusText = "";
+        private int _progress;
+        private string _errorMessage = "";
+
+        public string FileName { get; init; } = "";
+        public string FilePath { get; init; } = "";
+
+        public UploadFileStatus Status
+        {
+            get => _status;
+            set
+            {
+                _status = value;
+                OnPropertyChanged();
+                UpdateStatusText();
+                OnPropertyChanged(nameof(StatusColor));
+            }
+        }
+
+        public string StatusText
+        {
+            get => _statusText;
+            private set
+            {
+                _statusText = value;
+                OnPropertyChanged();
+            }
+        }
+
+        public int Progress
+        {
+            get => _progress;
+            set
+            {
+                _progress = value;
+                OnPropertyChanged();
+                UpdateStatusText();
+            }
+        }
+
+        public string ErrorMessage
+        {
+            get => _errorMessage;
+            set
+            {
+                _errorMessage = value;
+                OnPropertyChanged();
+                UpdateStatusText();
+            }
+        }
+
+        public Brush StatusColor => Status switch
+        {
+            UploadFileStatus.Pending => new SolidColorBrush(Color.FromRgb(128, 128, 128)),
+            UploadFileStatus.Uploading => new SolidColorBrush(Color.FromRgb(0, 120, 212)),
+            UploadFileStatus.Embedding => new SolidColorBrush(Color.FromRgb(255, 140, 0)),
+            UploadFileStatus.Completed => new SolidColorBrush(Color.FromRgb(16, 124, 16)),
+            UploadFileStatus.Failed => new SolidColorBrush(Color.FromRgb(232, 17, 35)),
+            _ => new SolidColorBrush(Color.FromRgb(128, 128, 128))
+        };
+
+        private void UpdateStatusText()
+        {
+            StatusText = Status switch
+            {
+                UploadFileStatus.Pending => "대기 중",
+                UploadFileStatus.Uploading => "업로드 중...",
+                UploadFileStatus.Embedding => $"임베딩 중... ({Progress}%)",
+                UploadFileStatus.Completed => "완료",
+                UploadFileStatus.Failed => $"실패: {ErrorMessage}",
+                _ => ""
+            };
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        private void OnPropertyChanged([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     public MainWindow()
@@ -737,54 +833,144 @@ public partial class MainWindow : Window
 
         var dlg = new OpenFileDialog
         {
-            Title = "문서 업로드",
-            Filter = "문서|*.pdf;*.pptx;*.ppt;*.docx;*.doc;*.xlsx;*.xls;*.txt|이미지|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff|모든 파일|*.*"
+            Title = "문서 업로드 (다중 선택 가능)",
+            Filter = "문서|*.pdf;*.pptx;*.ppt;*.docx;*.doc;*.xlsx;*.xls;*.txt|이미지|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff|모든 파일|*.*",
+            Multiselect = true
         };
-        if (dlg.ShowDialog() != true) return;
+        if (dlg.ShowDialog() != true || dlg.FileNames.Length == 0) 
+            return;
 
-        var path = dlg.FileName;
         var categoryId = cat.Id;
+        var files = dlg.FileNames;
 
-        UploadProgress.Visibility = Visibility.Visible;
-        UploadStatus.Text = "업로드/인덱싱 중...";
+        // 업로드 큐 초기화
+        _uploadQueue.Clear();
+        foreach (var filePath in files)
+        {
+            _uploadQueue.Add(new UploadFileItem
+            {
+                FileName = System.IO.Path.GetFileName(filePath),
+                FilePath = filePath,
+                Status = UploadFileStatus.Pending,
+                Progress = 0
+            });
+        }
+
+        // UI 설정
+        UploadQueueList.ItemsSource = _uploadQueue;
+        UploadQueuePanel.Visibility = Visibility.Visible;
+        UploadProgressPanel.Visibility = Visibility.Visible;
+
+        // 순차 처리
+        await ProcessUploadQueueAsync(categoryId);
+    }
+
+    private async System.Threading.Tasks.Task ProcessUploadQueueAsync(long categoryId)
+    {
+        var ctx = AppContextRoot.Instance;
+        int completed = 0;
+        int total = _uploadQueue.Count;
+
         try
         {
-            var res = ctx.Ingestion.Ingest(categoryId, path);
-            var total = res.ChunkIds.Count;
-            for (var i = 0; i < total; i++)
+            foreach (var item in _uploadQueue)
             {
-                var chunkId = res.ChunkIds[i];
-                var chunk = ctx.Chunks.FindById(chunkId);
-                var emb = await ctx.Llm.EmbedAsync(chunk.Content).ConfigureAwait(true);
-                ctx.Rag.IndexChunkEmbedding(chunkId, emb);
-                UploadStatus.Text = $"임베딩 {i + 1}/{total}";
-                await System.Threading.Tasks.Task.Yield();
+                try
+                {
+                    // 1. 업로드 단계
+                    item.Status = UploadFileStatus.Uploading;
+                    item.Progress = 0;
+                    UploadStatus.Text = $"파일 {completed + 1}/{total} 업로드 중...";
+
+                    await System.Threading.Tasks.Task.Yield();
+
+                    var res = ctx.Ingestion.Ingest(categoryId, item.FilePath);
+                    var chunkCount = res.ChunkIds.Count;
+
+                    // 2. 임베딩 단계
+                    item.Status = UploadFileStatus.Embedding;
+                    item.Progress = 0;
+
+                    for (var i = 0; i < chunkCount; i++)
+                    {
+                        var chunkId = res.ChunkIds[i];
+                        var chunk = ctx.Chunks.FindById(chunkId);
+                        var emb = await ctx.Llm.EmbedAsync(chunk.Content).ConfigureAwait(true);
+                        ctx.Rag.IndexChunkEmbedding(chunkId, emb);
+
+                        // 진행률 업데이트
+                        item.Progress = (int)((i + 1) * 100.0 / chunkCount);
+                        UploadStatus.Text = $"파일 {completed + 1}/{total} - 임베딩 {i + 1}/{chunkCount}";
+
+                        await System.Threading.Tasks.Task.Yield();
+                    }
+
+                    // 3. 완료
+                    item.Status = UploadFileStatus.Completed;
+                    item.Progress = 100;
+                    completed++;
+                }
+                catch (Exception ex)
+                {
+                    // 실패 처리
+                    item.Status = UploadFileStatus.Failed;
+                    item.ErrorMessage = ex.Message;
+                }
             }
 
+            // 모든 파일 처리 완료
             RefreshDocumentsGrid();
-            MessageBox.Show("인덱싱이 완료되었습니다.", "완료", MessageBoxButton.OK, MessageBoxImage.Information);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(ex.Message, "업로드 실패", MessageBoxButton.OK, MessageBoxImage.Error);
+
+            var failedCount = _uploadQueue.Count(x => x.Status == UploadFileStatus.Failed);
+            if (failedCount == 0)
+            {
+                MessageBox.Show($"{total}개 파일의 인덱싱이 완료되었습니다.",
+                    "완료", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            else
+            {
+                MessageBox.Show(
+                    $"완료: {completed}개\n실패: {failedCount}개\n\n" +
+                    "실패한 파일은 진행 목록에서 확인하세요.",
+                    "업로드 완료", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
         finally
         {
-            UploadProgress.Visibility = Visibility.Collapsed;
+            // UI 정리 (5초 후)
+            await System.Threading.Tasks.Task.Delay(5000);
+            UploadQueuePanel.Visibility = Visibility.Collapsed;
+            UploadProgressPanel.Visibility = Visibility.Collapsed;
             UploadStatus.Text = "";
         }
     }
 
     private void DeleteDoc_OnClick(object sender, RoutedEventArgs e)
     {
-        if (DocumentsGrid.SelectedItem is not DocumentRow row) return;
-        if (MessageBox.Show($"문서를 삭제할까요?\n{row.OriginalName}", "확인",
+        if (DocumentsGrid.SelectedItems.Count == 0) return;
+        
+        var selectedDocs = DocumentsGrid.SelectedItems.Cast<DocumentRow>().ToList();
+        var count = selectedDocs.Count;
+        
+        string message = count == 1
+            ? $"문서를 삭제할까요?\n{selectedDocs[0].OriginalName}"
+            : $"선택한 문서 {count}건을 삭제할까요?";
+        
+        if (MessageBox.Show(message, "확인",
                 MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
             return;
+        
         try
         {
-            AppContextRoot.Instance.Ingestion.DeleteDocument(row.Id);
+            var ctx = AppContextRoot.Instance;
+            foreach (var doc in selectedDocs)
+            {
+                ctx.Ingestion.DeleteDocument(doc.Id);
+            }
             RefreshDocumentsGrid();
+            
+            MessageBox.Show($"{count}건의 문서가 삭제되었습니다.", "완료", 
+                MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
