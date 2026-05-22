@@ -164,7 +164,7 @@ public sealed class AppSettingsDao
         }
 
         if (string.IsNullOrWhiteSpace(r["dsplayground"].Url))
-            r["dsplayground"].Url = "https://apigw-dev.aisp-shinhands.co.kr/v1";
+            r["dsplayground"].Url = "https://apigw.aisp-shinhands.co.kr/v1";
 
         return r;
     }
