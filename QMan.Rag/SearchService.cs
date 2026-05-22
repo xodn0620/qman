@@ -54,16 +54,25 @@ public sealed class SearchService
 
     private IReadOnlyList<SearchHit> LookupChunksForVecHits(IReadOnlyList<VecDao.VecHit> vecHits)
     {
-        var ids = string.Join(",", vecHits.Select(h => h.ChunkId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
-        if (ids.Length == 0) return Array.Empty<SearchHit>();
+        if (vecHits.Count == 0) return Array.Empty<SearchHit>();
 
         var map = new Dictionary<long, SearchHit>();
         using var cmd = _conn.CreateCommand();
+
+        // VALUES 절로 파라미터 바인딩하여 SQL Injection 방지
+        var valuesBuilder = new System.Text.StringBuilder();
+        for (int i = 0; i < vecHits.Count; i++)
+        {
+            if (i > 0) valuesBuilder.Append(',');
+            valuesBuilder.Append("($id").Append(i).Append(')');
+            cmd.Parameters.AddWithValue($"$id{i}", vecHits[i].ChunkId);
+        }
+
         cmd.CommandText = $"""
             SELECT c.id, c.document_id, d.original_name, c.source_label, c.content
             FROM chunks c
             JOIN documents d ON d.id = c.document_id
-            WHERE c.id IN ({ids});
+            WHERE c.id IN (SELECT value FROM (VALUES {valuesBuilder}));
             """;
         using var rd = cmd.ExecuteReader();
         while (rd.Read())

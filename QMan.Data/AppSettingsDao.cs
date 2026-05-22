@@ -181,8 +181,14 @@ public sealed class AppSettingsDao
 
     public static void ProtectStoredSecrets(SqliteConnection conn)
     {
+        // Windows 전용 앱이므로 비-Windows 환경에서는 실행 차단
         if (!OperatingSystem.IsWindows())
-            return;
+        {
+            throw new PlatformNotSupportedException(
+                "이 애플리케이션은 Windows 전용입니다. " +
+                "민감한 정보를 안전하게 보호하기 위해 Windows DPAPI를 사용하므로 " +
+                "다른 운영체제에서는 실행할 수 없습니다.");
+        }
 
         using var tx = conn.BeginTransaction();
         using var read = conn.CreateCommand();
@@ -295,8 +301,16 @@ public sealed class AppSettingsDao
             return value;
         if (value.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
             return value;
+        
+        // Windows 전용 앱이므로 비-Windows 환경에서는 실행 차단
+        // 민감한 정보(API 키)를 평문으로 저장하는 것을 방지
         if (!OperatingSystem.IsWindows())
-            return value;
+        {
+            throw new PlatformNotSupportedException(
+                "이 애플리케이션은 Windows 전용입니다. " +
+                "민감한 정보를 안전하게 보호하기 위해 Windows DPAPI를 사용하므로 " +
+                "다른 운영체제에서는 실행할 수 없습니다.");
+        }
 
         try
         {
@@ -316,8 +330,15 @@ public sealed class AppSettingsDao
             return value;
         if (!value.StartsWith(ProtectedPrefix, StringComparison.Ordinal))
             return value;
+        
+        // Windows 전용 앱이므로 비-Windows 환경에서는 실행 차단
         if (!OperatingSystem.IsWindows())
-            return string.Empty;
+        {
+            throw new PlatformNotSupportedException(
+                "이 애플리케이션은 Windows 전용입니다. " +
+                "민감한 정보를 안전하게 보호하기 위해 Windows DPAPI를 사용하므로 " +
+                "다른 운영체제에서는 실행할 수 없습니다.");
+        }
 
         try
         {
