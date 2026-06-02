@@ -10,18 +10,6 @@
         FontFamily="Segoe UI"
         Closing="MainWindow_OnClosing">
     <DockPanel LastChildFill="True">
-        <!-- 하단: 설정만 (벡터 상태 문구 없음) -->
-        <Border DockPanel.Dock="Bottom" Height="34" Background="{StaticResource BrushSidebar}"
-                BorderBrush="{StaticResource BrushBorder}" BorderThickness="0,1,0,0" Padding="12,0,8,0">
-            <Button x:Name="StatusSettingsButton" HorizontalAlignment="Right" Width="34" Height="28"
-                    Padding="0" Background="Transparent" BorderThickness="0"
-                    Cursor="Hand" ToolTip="설정"
-                    Click="StatusSettings_OnClick" VerticalAlignment="Center"
-                    FontFamily="Segoe MDL2 Assets" FontSize="15"
-                    Foreground="{StaticResource BrushMuted}"
-                    Content="&#xE713;"/>
-        </Border>
-
         <TabControl x:Name="MainTabs" Padding="0">
             <TabItem Header="채팅">
                 <Grid Margin="0">

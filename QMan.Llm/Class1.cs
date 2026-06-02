@@ -114,16 +114,19 @@ public sealed class OpenAiClient : ILlmClient
             input = text ?? string.Empty
         };
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, ResolveEmbeddingUrl())
+        var embUrl = ResolveEmbeddingUrl();
+        var embKey = ResolveEmbeddingAuthKey()!;
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, embUrl)
         {
             Content = JsonContent.Create(body)
         };
-        var embKey = ResolveEmbeddingAuthKey()!;
         req.Headers.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", embKey);
 
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        
         if (!resp.IsSuccessStatusCode)
             throw LlmHttpErrors.HttpFailure("OpenAI", "임베딩", resp.StatusCode, respBody);
 
@@ -156,7 +159,9 @@ public sealed class OpenAiClient : ILlmClient
             messages
         };
 
-        using var req = new HttpRequestMessage(HttpMethod.Post, ResolveChatUrl())
+        var chatUrl = ResolveChatUrl();
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, chatUrl)
         {
             Content = JsonContent.Create(body)
         };
@@ -165,6 +170,7 @@ public sealed class OpenAiClient : ILlmClient
 
         using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
         var respBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        
         if (!resp.IsSuccessStatusCode)
             throw LlmHttpErrors.HttpFailure("OpenAI", "채팅", resp.StatusCode, respBody);
 

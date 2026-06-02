@@ -168,20 +168,6 @@ public partial class MainWindow : Window
         AppContextRoot.Shutdown();
     }
 
-    private void StatusSettings_OnClick(object sender, RoutedEventArgs e)
-    {
-        var w = new SettingsWindow { Owner = this, FirstRun = false };
-        if (w.ShowDialog() != true)
-            return;
-
-        MessageBox.Show(this,
-            "설정이 저장되었습니다. 적용을 위해 앱을 다시 시작합니다.",
-            "설정",
-            MessageBoxButton.OK,
-            MessageBoxImage.Information);
-        AppRestartHelper.Restart();
-    }
-
     private const string DragFormatChatCategory = "QManCategoryItem";
 
     private CategoryItem? _chatCategoryDragMouseDownItem;
@@ -628,7 +614,31 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendBubble("Q-Man", "오류: " + ex.Message, false, categoryId);
+            // 네트워크 연결 오류 감지
+            var isNetworkError = ex is System.Net.Http.HttpRequestException 
+                || ex is System.Threading.Tasks.TaskCanceledException
+                || ex.Message.Contains("connection", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("network", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("unreachable", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("refused", StringComparison.OrdinalIgnoreCase);
+            
+            if (isNetworkError)
+            {
+                var ctx = AppContextRoot.Instance;
+                var apiUrl = ctx.Config.Url ?? "API 서버";
+                var errorMsg = $"해당 URL({apiUrl}) 접속이 안되고 있습니다.\n방화벽 및 연결 확인 부탁드립니다.";
+                
+                AppendBubble("Q-Man", errorMsg, false, categoryId);
+                
+                // 알림 팝업 표시
+                MessageBox.Show(this, errorMsg, "연결 오류", 
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            else
+            {
+                AppendBubble("Q-Man", "오류: " + ex.Message, false, categoryId);
+            }
         }
         finally
         {
@@ -914,7 +924,30 @@ public partial class MainWindow : Window
                 {
                     // 실패 처리
                     item.Status = UploadFileStatus.Failed;
-                    item.ErrorMessage = ex.Message;
+                    
+                    // 네트워크 연결 오류 감지
+                    var isNetworkError = ex is System.Net.Http.HttpRequestException 
+                        || ex is System.Threading.Tasks.TaskCanceledException
+                        || ex.Message.Contains("connection", StringComparison.OrdinalIgnoreCase)
+                        || ex.Message.Contains("timeout", StringComparison.OrdinalIgnoreCase)
+                        || ex.Message.Contains("network", StringComparison.OrdinalIgnoreCase)
+                        || ex.Message.Contains("unreachable", StringComparison.OrdinalIgnoreCase)
+                        || ex.Message.Contains("refused", StringComparison.OrdinalIgnoreCase);
+                    
+                    if (isNetworkError)
+                    {
+                        var apiUrl = ctx.Config.Url ?? "API 서버";
+                        var errorMsg = $"해당 URL({apiUrl}) 접속이 안되고 있습니다.\n방화벽 및 연결 확인 부탁드립니다.";
+                        item.ErrorMessage = errorMsg;
+                        
+                        // 알림 팝업 표시
+                        MessageBox.Show(this, errorMsg, "연결 오류", 
+                            MessageBoxButton.OK, MessageBoxImage.Error);
+                    }
+                    else
+                    {
+                        item.ErrorMessage = ex.Message;
+                    }
                 }
             }
 

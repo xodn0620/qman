@@ -35,6 +35,7 @@ public sealed class SqliteDb : IDisposable
 
         MigrateSchema();
         AppSettingsDao.TryImportLegacyConfigJson(Connection);
+        AppSettingsDao.InitializeDefaultSettings(Connection);  // 기본 설정 초기화를 여기서 실행
         AppSettingsDao.ProtectStoredSecrets(Connection);
         var kv = new AppSettingsDao(Connection).LoadAll();
         Config = AppConfig.FromStoredValues(kv);

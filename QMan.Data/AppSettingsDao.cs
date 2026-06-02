@@ -13,6 +13,14 @@ public sealed class AppSettingsDao
     private static readonly byte[] ProtectedEntropy = Encoding.UTF8.GetBytes("QMan.AppSettings.v1");
     private readonly SqliteConnection _conn;
 
+    // DS PlayGround 기본 설정 (난독화됨)
+    private const string ObfuscationKey = "QManDefaultKey2026";
+    private const string DefaultDsPlaygroundLlmKey = "MHlYVndWVFVYX01zBlQGU1cHfCxXXnVIXllHWxYtB00FVVQF"; // a4983324-398c-4ce1-a601-8827bfb47ef3
+    private const string DefaultDsPlaygroundEmbeddingKey = "YHwFC3xTUFZYDkd/A1QGB1MPfC9YWHZIBQAQWxFyUk0KAgcD"; // 11de8667-b34f-47a9-b962-cae7e9748255
+    private const string DefaultDsPlaygroundChatModel = "Qwen3.5-122B";
+    private const string DefaultDsPlaygroundEmbeddingModel = "bge-m3";
+    private const string DefaultDsPlaygroundUrl = "https://apigw.aisp-shinhands.co.kr/v1";
+
     public AppSettingsDao(SqliteConnection conn) => _conn = conn;
 
     public static bool IsSetupComplete(SqliteConnection conn)
@@ -364,5 +372,69 @@ public sealed class AppSettingsDao
         var payload = Convert.FromBase64String(value[ProtectedPrefix.Length..]);
         var plain = ProtectedData.Unprotect(payload, ProtectedEntropy, DataProtectionScope.CurrentUser);
         return Encoding.UTF8.GetString(plain);
+    }
+
+    /// <summary>난독화된 문자열을 복호화합니다.</summary>
+    private static string DeobfuscateString(string obfuscated)
+    {
+        var keyBytes = Encoding.UTF8.GetBytes(ObfuscationKey);
+        var encryptedBytes = Convert.FromBase64String(obfuscated);
+        var result = new byte[encryptedBytes.Length];
+        
+        for (int i = 0; i < encryptedBytes.Length; i++)
+        {
+            result[i] = (byte)(encryptedBytes[i] ^ keyBytes[i % keyBytes.Length]);
+        }
+        
+        return Encoding.UTF8.GetString(result);
+    }
+
+    /// <summary>첫 실행 시 DS PlayGround 기본 설정을 초기화합니다.</summary>
+    public static void InitializeDefaultSettings(SqliteConnection conn)
+    {
+        // DS PlayGround API 키가 있는지 확인
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = "SELECT value FROM app_kv WHERE key = $k LIMIT 1;";
+        checkCmd.Parameters.AddWithValue("$k", AppSettingsKeys.ProfileApiKey("dsplayground"));
+        var existingKey = checkCmd.ExecuteScalar() as string;
+        
+        // 이미 API 키가 설정되어 있으면 건너뜀
+        if (!string.IsNullOrWhiteSpace(existingKey))
+            return;
+
+        // DS PlayGround 기본 설정 초기화
+        var llmKey = DeobfuscateString(DefaultDsPlaygroundLlmKey);
+        var embeddingKey = DeobfuscateString(DefaultDsPlaygroundEmbeddingKey);
+
+        var defaultSettings = new Dictionary<string, string>
+        {
+            [AppSettingsKeys.LlmProviderKey] = "dsplayground",
+            [AppSettingsKeys.ProfileChatModel("dsplayground")] = DefaultDsPlaygroundChatModel,
+            [AppSettingsKeys.ProfileEmbeddingModel("dsplayground")] = DefaultDsPlaygroundEmbeddingModel,
+            [AppSettingsKeys.ProfileUrl("dsplayground")] = DefaultDsPlaygroundUrl,
+            [AppSettingsKeys.ProfileApiKey("dsplayground")] = llmKey,
+            [AppSettingsKeys.ProfileEmbeddingApiKey("dsplayground")] = embeddingKey,
+            [AppSettingsKeys.SetupComplete] = "1"
+        };
+
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            foreach (var kv in defaultSettings)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.Transaction = tx;
+                cmd.CommandText = "INSERT OR REPLACE INTO app_kv(key, value) VALUES ($k, $v);";
+                cmd.Parameters.AddWithValue("$k", kv.Key);
+                cmd.Parameters.AddWithValue("$v", EncodeStoredValue(kv.Key, kv.Value));
+                cmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 }
